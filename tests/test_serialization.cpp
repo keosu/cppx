@@ -13,42 +13,42 @@ struct Point {
     int x;
     int y;
 };
-CPPX_SERIALIZABLE_2(Point, x, y)
+CPPX_SERIALIZABLE(Point, x, y)
 
 struct Person {
     std::string name;
     int age;
     std::vector<std::string> hobbies;
 };
-CPPX_SERIALIZABLE_3(Person, name, age, hobbies)
+CPPX_SERIALIZABLE(Person, name, age, hobbies)
 
 struct Address {
     std::string street;
     std::string city;
     std::string country;
 };
-CPPX_SERIALIZABLE_3(Address, street, city, country)
+CPPX_SERIALIZABLE(Address, street, city, country)
 
 struct Company {
     std::string name;
     Address headquarters;
     std::vector<Person> employees;
 };
-CPPX_SERIALIZABLE_3(Company, name, headquarters, employees)
+CPPX_SERIALIZABLE(Company, name, headquarters, employees)
 
 enum class Priority {
     Low,
     Medium,
     High
 };
-CPPX_ENUM_SERIALIZABLE_3(Priority, Low, Medium, High)
+CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High)
 
 struct Task {
     std::string title;
     Priority priority;
     std::optional<std::string> assignee;
 };
-CPPX_SERIALIZABLE_3(Task, title, priority, assignee)
+CPPX_SERIALIZABLE(Task, title, priority, assignee)
 
 // ============================================================================
 // 测试用例
@@ -392,14 +392,16 @@ int main() {
     auto logger = get_logger("test_serialization");
     logger->info("=== Running cppx.serialization tests ===\n");
     
-    auto& runner = test_runner::instance();
-    int result = runner.run_all();
+    // Create test runner (not a singleton, just create instance)
+    test_runner runner;
+    
+    // Run all tests
+    auto results = runner.run_all();
     
     logger->info("\n=== Test summary ===");
-    logger->info("Total: {}", runner.total_tests());
-    logger->info("Passed: {}", runner.passed_tests());
-    logger->info("Failed: {}", runner.failed_tests());
+    logger->info("Tests passed: {}", runner.passed_count());
+    logger->info("Tests failed: {}", runner.failed_count());
     
-    return result;
+    return runner.failed_count() == 0 ? 0 : 1;
 }
 

@@ -15,8 +15,8 @@ struct Point {
     int y;
 };
 
-// 注册序列化支持（一行搞定）
-CPPX_SERIALIZABLE_2(Point, x, y)
+// 注册序列化支持（一行搞定，自动识别参数个数！）
+CPPX_SERIALIZABLE(Point, x, y)
 
 // ============================================================================
 // 示例 2: 包含各种类型的复杂结构
@@ -27,7 +27,7 @@ enum class Priority {
     Medium,
     High
 };
-CPPX_ENUM_SERIALIZABLE_3(Priority, Low, Medium, High)
+CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High)
 
 struct Person {
     std::string name;
@@ -38,7 +38,7 @@ struct Person {
     std::map<std::string, int> scores;
 };
 
-CPPX_SERIALIZABLE_6(Person, name, age, hobbies, email, priority, scores)
+CPPX_SERIALIZABLE(Person, name, age, hobbies, email, priority, scores)
 
 // ============================================================================
 // 示例 3: 嵌套结构
@@ -49,14 +49,14 @@ struct Address {
     std::string city;
     std::string country;
 };
-CPPX_SERIALIZABLE_3(Address, street, city, country)
+CPPX_SERIALIZABLE(Address, street, city, country)
 
 struct Company {
     std::string name;
     Address headquarters;
     std::vector<Person> employees;
 };
-CPPX_SERIALIZABLE_3(Company, name, headquarters, employees)
+CPPX_SERIALIZABLE(Company, name, headquarters, employees)
 
 // ============================================================================
 // 主程序

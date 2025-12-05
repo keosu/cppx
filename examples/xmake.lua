@@ -18,6 +18,7 @@ function add_example(name, source_file, default_build)
         
         -- Module support
         set_policy("build.c++.modules", true)
+        add_cxxflags("/Zc:preprocessor", {tools = "cl"})  -- Conforming preprocessor
         add_cxxflags("/utf-8", {tools = "cl"})
     target_end()
 end

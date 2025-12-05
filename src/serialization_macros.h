@@ -1,7 +1,12 @@
 // cppx.serialization - Macro definitions
-// Automatic parameter counting for MSVC + C++20 modules compatibility
+// Using /Zc:preprocessor for automatic parameter counting (VS2019 16.5+)
 
 #pragma once
+
+// Check if conforming preprocessor is enabled
+#if !defined(_MSVC_TRADITIONAL) || _MSVC_TRADITIONAL
+    #error "This header requires /Zc:preprocessor flag for conforming preprocessor"
+#endif
 
 // ============================================================================
 // Helper macros for individual field serialization
@@ -18,25 +23,37 @@
     }
 
 // ============================================================================
-// Argument counting macros (MSVC compatible)
+// Argument counting macros (requires /Zc:preprocessor)
 // ============================================================================
 
-// Helper to expand arguments  
-#define CPPX_EXPAND(...) __VA_ARGS__
+// Count arguments (max 11 = Type + 10 fields)
+#define CPPX_COUNT_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, N, ...) N
+#define CPPX_COUNT(...) CPPX_COUNT_IMPL(__VA_ARGS__, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1)
 
-// Count fields (excluding Type parameter)
-// When called with (Type, f1, f2), we want to return 2
-// _1=Type, _2=f1, _3=f2, so we skip _1 and count from _2
-#define CPPX_COUNT_FIELDS(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, N, ...) N
-#define CPPX_FIELD_COUNT(...) CPPX_EXPAND(CPPX_COUNT_FIELDS(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+// Get field count: subtract 1 from total args to exclude Type parameter
+// E.g., FIELD_COUNT(Point, x, y) = 3 args - 1 = 2 fields
+#define CPPX_FIELD_COUNT_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, N, ...) N  
+#define CPPX_FIELD_COUNT(...) CPPX_FIELD_COUNT_IMPL(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
 
 // Concatenate macro names
-#define CPPX_CONCAT(a, b) a##b
-#define CPPX_CONCAT2(a, b) CPPX_CONCAT(a, b)
+#define CPPX_CONCAT_IMPL(a, b) a##b
+#define CPPX_CONCAT(a, b) CPPX_CONCAT_IMPL(a, b)
 
 // Select the right macro based on field count
-#define CPPX_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT2(CPPX_SERIALIZABLE_, N)
-#define CPPX_ENUM_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT2(CPPX_ENUM_SERIALIZABLE_, N)
+#define CPPX_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT(CPPX_SERIALIZABLE_, N)
+#define CPPX_ENUM_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT(CPPX_ENUM_SERIALIZABLE_, N)
+
+// ============================================================================
+// Argument counting macros (requires conforming preprocessor)
+// ============================================================================
+
+// Count arguments: supports up to 10 fields (excluding Type parameter)
+#define CPPX_VA_ARGS_COUNT_IMPL(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, N, ...) N
+#define CPPX_VA_ARGS_COUNT(...) CPPX_VA_ARGS_COUNT_IMPL(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+
+// Concatenation helpers
+#define CPPX_CONCAT_IMPL(a, b) a##b
+#define CPPX_CONCAT(a, b) CPPX_CONCAT_IMPL(a, b)
 
 // ============================================================================
 // Serialization macros for different field counts (1-10 fields)

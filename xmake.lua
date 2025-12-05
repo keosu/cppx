@@ -24,6 +24,10 @@ end
 target("cppx")
     set_kind("static")
     
+    -- Enable conforming preprocessor for better macro expansion (VS2019 16.5+)
+    add_cxxflags("/Zc:preprocessor", {tools = "cl"})
+    add_cxxflags("/utf-8", {tools = "cl"})
+    
     -- Add module files as public so dependent targets can use them
     add_files("src/*.cppm", {public = true})
     
