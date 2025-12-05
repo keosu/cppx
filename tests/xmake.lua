@@ -1,10 +1,10 @@
 -- ===========================================================================
--- Tests - 通过依赖核心库，不再需要手动添加模块文件
+-- Tests - 简化配置使用辅助函数
 -- ===========================================================================
 
 -- Helper function to create test targets
 function add_cppx_test(name, source_file, default_build)
-    default_build = default_build or false
+    default_build = default_build or true
     
     target(name)
         set_kind("binary")
@@ -12,10 +12,7 @@ function add_cppx_test(name, source_file, default_build)
         set_group("tests")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/tests")
         
-        -- Add source file
         add_files(source_file)
-        
-        -- 依赖核心库（应该自动继承模块和链接）
         add_deps("cppx")
         
         -- Module support
@@ -27,7 +24,7 @@ function add_cppx_test(name, source_file, default_build)
     target_end()
 end
 
--- Define all tests - 现在只需要指定源文件！
+-- Define all tests with their corresponding module
 add_cppx_test("test_error", "test_error.cpp")
 add_cppx_test("test_string_utils", "test_string_utils.cpp")
 add_cppx_test("test_file_system", "test_file_system.cpp")
@@ -35,5 +32,5 @@ add_cppx_test("test_time_utils", "test_time_utils.cpp")
 add_cppx_test("test_concurrent", "test_concurrent.cpp")
 add_cppx_test("test_math_utils", "test_math_utils.cpp")
 add_cppx_test("test_logging", "test_logging.cpp")
-add_cppx_test("test_cli", "test_cli.cpp")
+add_cppx_test("test_cli", "test_cli.cpp", "cli")
 add_cppx_test("test_test", "test_test.cpp")

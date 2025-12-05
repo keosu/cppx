@@ -1,9 +1,10 @@
 -- ===========================================================================
--- Examples - 通过依赖核心库，不再需要手动添加模块文件
+-- Examples - 简化配置使用辅助函数
 -- ===========================================================================
-
+ 
 -- Helper function to create example targets
 function add_example(name, source_file, default_build)
+    extra_modules = extra_modules or {}
     default_build = default_build or true
     
     target(name)
@@ -11,11 +12,8 @@ function add_example(name, source_file, default_build)
         set_default(default_build)
         set_group("examples")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/examples")
-        
-        -- Add source file
+         
         add_files(source_file)
-        
-        -- 依赖核心库（应该自动继承模块和链接）
         add_deps("cppx")
         
         -- Module support
@@ -24,7 +22,7 @@ function add_example(name, source_file, default_build)
     target_end()
 end
 
--- Define all examples - 现在只需要指定源文件！
+-- Define all examples with their specific module dependencies
 add_example("error_demo", "error_demo.cpp")
 add_example("string_utils_demo", "string_utils_demo.cpp")
 add_example("file_system_demo", "file_system_demo.cpp")

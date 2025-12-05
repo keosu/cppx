@@ -1,4 +1,4 @@
-// cppx.test - A modern c++23 module-based testing framework
+// cppx.test - A modern C++20 module-based testing framework
 // Inspired by Catch2 with simplified syntax
 
 export module cppx.test;

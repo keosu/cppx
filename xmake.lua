@@ -33,9 +33,6 @@ target("cppx")
     -- Export include and module directories for dependent targets
     add_includedirs("src", {public = true})
     
-    -- 导出模块目录，让依赖的 target 可以找到编译好的模块
-    add_moduledirs("src", {public = true})
-    
     -- Add header files for macros
     add_headerfiles("src/*.h", {public = true})
     
