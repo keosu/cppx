@@ -30,11 +30,15 @@ target("cppx")
     -- Set module directory
     set_policy("build.c++.modules", true)
     
-    -- Export module directories for dependent targets
+    -- Export module directories for dependent targets (让依赖的 target 能找到模块)
     add_includedirs("src", {public = true})
+    
+    -- Add header files for macros
+    add_headerfiles("src/*.h", {public = true})
     
     -- Install headers
     add_installfiles("src/*.cppm", {prefixdir = "include/cppx"})
+    add_installfiles("src/*.h", {prefixdir = "include/cppx"})
     
     -- MSVC flags for C++20 modules and import std
     add_cxxflags("/utf-8", {tools = "cl"})
