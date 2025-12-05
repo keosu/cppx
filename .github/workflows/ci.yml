@@ -39,17 +39,9 @@ jobs:
         arch: x64
     
     - name: Install xmake
-      run: |
-        # Install latest xmake via PowerShell script
-        Invoke-WebRequest -Uri "https://xmake.io/psget.text" -UseBasicParsing | Invoke-Expression 
-        
-        # Add xmake to PATH for this session
-        echo echo "$env:ProgramFiles\xmake"
-        where.exe xmake
-        echo "$env:ProgramFiles\xmake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        echo "$env:ProgramFiles\xmake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        echo "======================"
-        echo $env:GITHUB_PATH
+      uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: latest
     
     - name: Configure
       run: |
