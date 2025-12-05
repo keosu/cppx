@@ -7,20 +7,29 @@ on:
     branches: [ main, develop ]
 
 jobs:
+  # Code formatting check on Linux (lightweight, no build required)
+  code-format:
+    name: Code Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check code formatting
+      uses: DoozyX/clang-format-lint-action@v0.18
+      with:
+        source: 'src tests examples'
+        extensions: 'cpp,cppm,h'
+        clangFormatVersion: 18
+        style: file  # 使用 .clang-format 配置
+
   # Linux and macOS builds are currently disabled (MSVC-only project with /Zc:preprocessor)
   # Uncomment when cross-platform support is added
   
   # build-linux:
   #   name: Linux - ${{ matrix.compiler }} - ${{ matrix.mode }}
   #   runs-on: ubuntu-latest
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       compiler: [gcc-13, clang-17]
-  #       mode: [debug, release]
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   # ... (steps omitted)
+  #   ... (omitted)
 
   build-windows:
     name: Windows - MSVC - ${{ matrix.mode }}
@@ -42,14 +51,6 @@ jobs:
       uses: xmake-io/github-action-setup-xmake@v1
       with:
         xmake-version: latest
-    
-    - name: Check code formatting
-      uses: DoozyX/clang-format-lint-action@v0.18
-      with:
-        source: 'src tests examples'
-        extensions: 'cpp,cppm,h'
-        clangFormatVersion: 18
-        style: file  # 使用项目的 .clang-format 文件
     
     - name: Configure
       run: |
