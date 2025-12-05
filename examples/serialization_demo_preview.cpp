@@ -16,7 +16,7 @@ struct Point {
 };
 
 // 注册序列化支持（一行搞定）
-CPPX_SERIALIZABLE_2(Point, x, y)
+CPPX_SERIALIZABLE(Point, x, y);
 
 // ============================================================================
 // 示例 2: 包含各种类型的复杂结构
@@ -27,7 +27,7 @@ enum class Priority {
     Medium,
     High
 };
-CPPX_ENUM_SERIALIZABLE_3(Priority, Low, Medium, High)
+CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High);
 
 struct Person {
     std::string name;
@@ -38,7 +38,7 @@ struct Person {
     std::map<std::string, int> scores;
 };
 
-CPPX_SERIALIZABLE_6(Person, name, age, hobbies, email, priority, scores)
+CPPX_SERIALIZABLE(Person, name, age, hobbies, email, priority, scores);
 
 // ============================================================================
 // 示例 3: 嵌套结构
@@ -49,14 +49,14 @@ struct Address {
     std::string city;
     std::string country;
 };
-CPPX_SERIALIZABLE_3(Address, street, city, country)
+CPPX_SERIALIZABLE(Address, street, city, country);
 
 struct Company {
     std::string name;
     Address headquarters;
     std::vector<Person> employees;
 };
-CPPX_SERIALIZABLE_3(Company, name, headquarters, employees)
+CPPX_SERIALIZABLE(Company, name, headquarters, employees);
 
 // ============================================================================
 // 主程序
@@ -72,13 +72,13 @@ int main() {
     logger->info("1. Basic types:");
     {
         int num = 42;
-        logger->info("   int to JSON: {}", to_json_string(num));
+        logger->info("   int to JSON: {}", to_json(num));
         
         std::string text = "hello world";
-        logger->info("   string to JSON: {}", to_json_string(text));
+        logger->info("   string to JSON: {}", to_json(text));
         
         std::vector<int> numbers = {1, 2, 3, 4, 5};
-        logger->info("   vector to JSON: {}", to_json_string(numbers));
+        logger->info("   vector to JSON: {}", to_json(numbers));
     }
     logger->info("");
     
@@ -90,12 +90,25 @@ int main() {
         Point p{100, 200};
         
         // JSON 序列化
-        auto json_str = to_json_string(p, 2);  // 2 空格缩进
+        auto json_str = to_json(p, 2);  // 2 空格缩进
         logger->info("   Point to JSON:\n{}", json_str);
         
         // JSON 反序列化
-        auto p2 = from_json_string<Point>(R"({"x": 50, "y": 75})");
-        logger->info("   Deserialized: Point({}, {})", p2.x, p2.y);
+        auto result = from_json<Point>(R"({"x": 50, "y": 75})");
+        if (result.is_ok()) {
+            auto p2 = result.value();
+            logger->info("   Deserialized: Point({}, {})", p2.x, p2.y);
+        }
+        
+        // 二进制序列化
+        auto binary = to_binary(p);
+        logger->info("   Binary size: {} bytes", binary.size());
+        
+        // 二进制反序列化
+        auto bin_result = from_binary<Point>(binary);
+        if (bin_result.is_ok()) {
+            logger->info("   ✓ Binary round-trip successful");
+        }
     }
     logger->info("");
     
@@ -113,17 +126,22 @@ int main() {
             .scores = {{"math", 95}, {"english", 87}}
         };
         
-        auto json_str = to_json_string(person, 2);
+        auto json_str = to_json(person, 2);
         logger->info("   Person to JSON:\n{}", json_str);
         
         // 保存到文件
-        save_json("person.json", person);
-        logger->info("   ✓ Saved to person.json");
+        auto save_result = save_json("person.json", person);
+        if (save_result.is_ok()) {
+            logger->info("   ✓ Saved to person.json");
+        }
         
         // 从文件加载
-        auto loaded = load_json<Person>("person.json");
-        logger->info("   ✓ Loaded from person.json");
-        logger->info("   Name: {}, Age: {}", loaded.name, loaded.age);
+        auto load_result = load_json<Person>("person.json");
+        if (load_result.is_ok()) {
+            auto loaded = load_result.value();
+            logger->info("   ✓ Loaded from person.json");
+            logger->info("   Name: {}, Age: {}", loaded.name, loaded.age);
+        }
     }
     logger->info("");
     
@@ -141,7 +159,7 @@ int main() {
             }
         };
         
-        auto json_str = to_json_string(company, 2);
+        auto json_str = to_json(company, 2);
         logger->info("   Company to JSON:\n{}", json_str);
     }
     logger->info("");
@@ -154,15 +172,15 @@ int main() {
         // optional
         std::optional<int> has_value = 42;
         std::optional<int> no_value;
-        logger->info("   optional (has value): {}", to_json_string(has_value));
-        logger->info("   optional (empty): {}", to_json_string(no_value));
+        logger->info("   optional (has value): {}", to_json(has_value));
+        logger->info("   optional (empty): {}", to_json(no_value));
         
         // map
         std::map<std::string, std::string> dict = {
             {"key1", "value1"},
             {"key2", "value2"}
         };
-        logger->info("   map: {}", to_json_string(dict));
+        logger->info("   map: {}", to_json(dict));
     }
     logger->info("");
     
@@ -172,19 +190,15 @@ int main() {
     logger->info("6. Error handling:");
     {
         // 解析错误的 JSON
-        try {
-            auto result = from_json_string<Person>(R"({"invalid": "json"})");
-            logger->info("   Unexpected: should have thrown");
-        } catch (const std::exception& e) {
-            logger->info("   ✓ Detected invalid JSON: {}", e.what());
+        auto result = from_json<Person>(R"({"invalid": "json"})");
+        if (result.is_err()) {
+            logger->info("   ✓ Detected invalid JSON: {}", result.error());
         }
         
         // 类型不匹配
-        try {
-            auto result2 = from_json_string<int>(R"("not a number")");
-            logger->info("   Unexpected: should have thrown");
-        } catch (const std::exception& e) {
-            logger->info("   ✓ Detected type mismatch: {}", e.what());
+        auto result2 = from_json<int>(R"("not a number")");
+        if (result2.is_err()) {
+            logger->info("   ✓ Detected type mismatch: {}", result2.error());
         }
     }
     logger->info("");

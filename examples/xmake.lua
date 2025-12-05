@@ -33,4 +33,4 @@ add_example("logging_demo", "logging_demo.cpp")
 add_example("cli_demo", "cli_demo.cpp")
 add_example("test_demo", "test_demo.cpp")
 add_example("serialization_simple_demo", "serialization_simple_demo.cpp")
--- add_example("serialization_demo", "serialization_demo.cpp")  -- 暂时禁用，宏问题待修复
+add_example("serialization_demo", "serialization_demo.cpp")

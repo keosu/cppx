@@ -1,140 +1,428 @@
 // cppx.serialization - Macro definitions
-// This file provides macros for easy serialization registration
+// Simplified macros for MSVC + C++20 modules compatibility
 
 #pragma once
 
 // ============================================================================
-// Helper macros for field serialization
+// Helper macros for individual field serialization
 // ============================================================================
 
-// 将每个字段序列化到 JSON 对象
-#define CPPX_SERIALIZE_FIELD(obj, field) \
+// Serialize a single field to JSON
+#define CPPX_SER_FIELD(obj, field) \
     j[#field] = cppx::serializer<std::remove_cvref_t<decltype(obj.field)>>::to_json(obj.field);
 
-// 从 JSON 对象反序列化每个字段 - 宏版本 (用于 CPPX_FOREACH)
-#define CPPX_DESERIALIZE_FIELD_IMPL(obj, field) \
-    if (g_json_obj.contains(#field)) { \
-        obj.field = cppx::serializer<std::remove_cvref_t<decltype(obj.field)>>::from_json(g_json_obj[#field]); \
+// Deserialize a single field from JSON
+#define CPPX_DESER_FIELD(obj, json_obj, field) \
+    if (json_obj.contains(#field)) { \
+        obj.field = cppx::serializer<std::remove_cvref_t<decltype(obj.field)>>::from_json(json_obj[#field]); \
     }
 
-// 辅助宏：展开变长参数
-#define CPPX_EXPAND(...) __VA_ARGS__
-
-// 辅助宏：获取宏参数个数
-#define CPPX_ARG_COUNT_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, N, ...) N
-#define CPPX_ARG_COUNT(...) CPPX_EXPAND(CPPX_ARG_COUNT_IMPL(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
-
-// 辅助宏：针对每个字段应用操作
-#define CPPX_FOREACH_1(macro, obj, f1) macro(obj, f1)
-#define CPPX_FOREACH_2(macro, obj, f1, f2) macro(obj, f1) macro(obj, f2)
-#define CPPX_FOREACH_3(macro, obj, f1, f2, f3) macro(obj, f1) macro(obj, f2) macro(obj, f3)
-#define CPPX_FOREACH_4(macro, obj, f1, f2, f3, f4) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4)
-#define CPPX_FOREACH_5(macro, obj, f1, f2, f3, f4, f5) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5)
-#define CPPX_FOREACH_6(macro, obj, f1, f2, f3, f4, f5, f6) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5) macro(obj, f6)
-#define CPPX_FOREACH_7(macro, obj, f1, f2, f3, f4, f5, f6, f7) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5) macro(obj, f6) macro(obj, f7)
-#define CPPX_FOREACH_8(macro, obj, f1, f2, f3, f4, f5, f6, f7, f8) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5) macro(obj, f6) macro(obj, f7) macro(obj, f8)
-#define CPPX_FOREACH_9(macro, obj, f1, f2, f3, f4, f5, f6, f7, f8, f9) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5) macro(obj, f6) macro(obj, f7) macro(obj, f8) macro(obj, f9)
-#define CPPX_FOREACH_10(macro, obj, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) macro(obj, f1) macro(obj, f2) macro(obj, f3) macro(obj, f4) macro(obj, f5) macro(obj, f6) macro(obj, f7) macro(obj, f8) macro(obj, f9) macro(obj, f10)
-
-#define CPPX_FOREACH_IMPL2(count, macro, obj, ...) CPPX_FOREACH_##count(macro, obj, __VA_ARGS__)
-#define CPPX_FOREACH_IMPL(count, macro, obj, ...) CPPX_FOREACH_IMPL2(count, macro, obj, __VA_ARGS__)
-#define CPPX_FOREACH(macro, obj, ...) CPPX_FOREACH_IMPL(CPPX_ARG_COUNT(__VA_ARGS__), macro, obj, __VA_ARGS__)
-
 // ============================================================================
-// Main serialization macro
+// Serialization macros for different field counts (1-10 fields)
 // ============================================================================
 
-/**
- * Register a type for serialization
- * 
- * Usage:
- *   struct Person {
- *       std::string name;
- *       int age;
- *       std::vector<std::string> hobbies;
- *   };
- *   
- *   CPPX_SERIALIZABLE(Person, name, age, hobbies);
- */
-#define CPPX_SERIALIZABLE(Type, ...) \
+// 1 field
+#define CPPX_SERIALIZABLE_1(Type, f1) \
     namespace cppx { \
     template<> \
     struct serializer<Type> { \
         static json to_json(const Type& value) { \
             auto j = json::object(); \
-            CPPX_FOREACH(CPPX_SERIALIZE_FIELD, value, __VA_ARGS__) \
+            CPPX_SER_FIELD(value, f1) \
             return j; \
         } \
-        \
         static Type from_json(const json& j_param) { \
             Type value{}; \
-            const auto& g_json_obj = j_param; \
-            CPPX_FOREACH(CPPX_DESERIALIZE_FIELD_IMPL, value, __VA_ARGS__) \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 2 fields
+#define CPPX_SERIALIZABLE_2(Type, f1, f2) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 3 fields
+#define CPPX_SERIALIZABLE_3(Type, f1, f2, f3) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 4 fields
+#define CPPX_SERIALIZABLE_4(Type, f1, f2, f3, f4) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 5 fields
+#define CPPX_SERIALIZABLE_5(Type, f1, f2, f3, f4, f5) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 6 fields
+#define CPPX_SERIALIZABLE_6(Type, f1, f2, f3, f4, f5, f6) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            CPPX_SER_FIELD(value, f6) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            CPPX_DESER_FIELD(value, j_param, f6) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 7 fields
+#define CPPX_SERIALIZABLE_7(Type, f1, f2, f3, f4, f5, f6, f7) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            CPPX_SER_FIELD(value, f6) \
+            CPPX_SER_FIELD(value, f7) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            CPPX_DESER_FIELD(value, j_param, f6) \
+            CPPX_DESER_FIELD(value, j_param, f7) \
+            return value; \
+        } \
+    }; \
+    }
+
+// 8 fields
+#define CPPX_SERIALIZABLE_8(Type, f1, f2, f3, f4, f5, f6, f7, f8) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            CPPX_SER_FIELD(value, f6) \
+            CPPX_SER_FIELD(value, f7) \
+            CPPX_SER_FIELD(value, f8) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            CPPX_DESER_FIELD(value, j_param, f6) \
+            CPPX_DESER_FIELD(value, j_param, f7) \
+            CPPX_DESER_FIELD(value, j_param, f8) \
             return value; \
         } \
     }; \
     }
 
 // ============================================================================
-// Enum serialization macro
+// Macro overloading based on argument count
 // ============================================================================
 
-// 辅助宏：生成单个枚举值的 case
-#define CPPX_ENUM_TO_STRING_CASE(EnumType, value) \
-    case EnumType::value: return #value;
-
-#define CPPX_ENUM_FROM_STRING_CASE(EnumType, value) \
-    if (str == #value) return EnumType::value;
-
-// 针对每个枚举值生成 case
-#define CPPX_ENUM_CASES_1(macro, EnumType, v1) macro(EnumType, v1)
-#define CPPX_ENUM_CASES_2(macro, EnumType, v1, v2) macro(EnumType, v1) macro(EnumType, v2)
-#define CPPX_ENUM_CASES_3(macro, EnumType, v1, v2, v3) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3)
-#define CPPX_ENUM_CASES_4(macro, EnumType, v1, v2, v3, v4) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3) macro(EnumType, v4)
-#define CPPX_ENUM_CASES_5(macro, EnumType, v1, v2, v3, v4, v5) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3) macro(EnumType, v4) macro(EnumType, v5)
-#define CPPX_ENUM_CASES_6(macro, EnumType, v1, v2, v3, v4, v5, v6) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3) macro(EnumType, v4) macro(EnumType, v5) macro(EnumType, v6)
-#define CPPX_ENUM_CASES_7(macro, EnumType, v1, v2, v3, v4, v5, v6, v7) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3) macro(EnumType, v4) macro(EnumType, v5) macro(EnumType, v6) macro(EnumType, v7)
-#define CPPX_ENUM_CASES_8(macro, EnumType, v1, v2, v3, v4, v5, v6, v7, v8) macro(EnumType, v1) macro(EnumType, v2) macro(EnumType, v3) macro(EnumType, v4) macro(EnumType, v5) macro(EnumType, v6) macro(EnumType, v7) macro(EnumType, v8)
-
-#define CPPX_ENUM_CASES_IMPL2(count, macro, EnumType, ...) CPPX_ENUM_CASES_##count(macro, EnumType, __VA_ARGS__)
-#define CPPX_ENUM_CASES_IMPL(count, macro, EnumType, ...) CPPX_ENUM_CASES_IMPL2(count, macro, EnumType, __VA_ARGS__)
-#define CPPX_ENUM_CASES(macro, EnumType, ...) CPPX_ENUM_CASES_IMPL(CPPX_ARG_COUNT(__VA_ARGS__), macro, EnumType, __VA_ARGS__)
+// Count arguments: Type + fields, so 2 args = 1 field, 3 args = 2 fields, etc.
+#define CPPX_GET_MACRO2(_1, _2, NAME, ...) NAME
+#define CPPX_GET_MACRO3(_1, _2, _3, NAME, ...) NAME
+#define CPPX_GET_MACRO4(_1, _2, _3, _4, NAME, ...) NAME
+#define CPPX_GET_MACRO5(_1, _2, _3, _4, _5, NAME, ...) NAME
+#define CPPX_GET_MACRO6(_1, _2, _3, _4, _5, _6, NAME, ...) NAME
+#define CPPX_GET_MACRO7(_1, _2, _3, _4, _5, _6, _7, NAME, ...) NAME
+#define CPPX_GET_MACRO8(_1, _2, _3, _4, _5, _6, _7, _8, NAME, ...) NAME
+#define CPPX_GET_MACRO9(_1, _2, _3, _4, _5, _6, _7, _8, _9, NAME, ...) NAME
 
 /**
- * Register an enum for serialization
+ * CPPX_SERIALIZABLE - Register a type for serialization (supports 1-8 fields)
  * 
  * Usage:
- *   enum class Priority {
- *       Low,
- *       Medium,
- *       High
+ *   struct Point { int x, y; };
+ *   CPPX_SERIALIZABLE(Point, x, y)
+ * 
+ *   struct Person { 
+ *       std::string name;
+ *       int age;
+ *       std::vector<std::string> hobbies;
  *   };
- *   
- *   CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High);
+ *   CPPX_SERIALIZABLE(Person, name, age, hobbies)
  */
-#define CPPX_ENUM_SERIALIZABLE(EnumType, ...) \
+#define CPPX_SERIALIZABLE(...) \
+    CPPX_GET_MACRO9(__VA_ARGS__, \
+        CPPX_SERIALIZABLE_8, \
+        CPPX_SERIALIZABLE_7, \
+        CPPX_SERIALIZABLE_6, \
+        CPPX_SERIALIZABLE_5, \
+        CPPX_SERIALIZABLE_4, \
+        CPPX_SERIALIZABLE_3, \
+        CPPX_SERIALIZABLE_2, \
+        CPPX_SERIALIZABLE_1, \
+        invalid \
+    )(__VA_ARGS__)
+
+// ============================================================================
+// Enum serialization macros
+// ============================================================================
+
+// Helper macro for enum to string case
+#define CPPX_ENUM_CASE(EnumType, value) \
+    case EnumType::value: return #value;
+
+// 1 value
+#define CPPX_ENUM_SERIALIZABLE_1(EnumType, v1) \
     namespace cppx { \
-    inline std::string enum_to_string(EnumType value) { \
+    inline std::string enum_to_string_##EnumType(EnumType value) { \
         switch (value) { \
-            CPPX_ENUM_CASES(CPPX_ENUM_TO_STRING_CASE, EnumType, __VA_ARGS__) \
+            CPPX_ENUM_CASE(EnumType, v1) \
             default: return "Unknown"; \
         } \
     } \
-    \
     inline EnumType enum_from_string_##EnumType(const std::string& str) { \
-        CPPX_ENUM_CASES(CPPX_ENUM_FROM_STRING_CASE, EnumType, __VA_ARGS__) \
+        if (str == #v1) return EnumType::v1; \
         throw std::runtime_error("invalid enum string: " + str); \
     } \
-    \
     template<> \
     struct serializer<EnumType> { \
         static json to_json(const EnumType& value) { \
-            return json(enum_to_string(value)); \
+            return json(enum_to_string_##EnumType(value)); \
         } \
-        \
         static EnumType from_json(const json& j) { \
             return enum_from_string_##EnumType(j.as_string()); \
         } \
     }; \
     }
 
+// 2 values
+#define CPPX_ENUM_SERIALIZABLE_2(EnumType, v1, v2) \
+    namespace cppx { \
+    inline std::string enum_to_string_##EnumType(EnumType value) { \
+        switch (value) { \
+            CPPX_ENUM_CASE(EnumType, v1) \
+            CPPX_ENUM_CASE(EnumType, v2) \
+            default: return "Unknown"; \
+        } \
+    } \
+    inline EnumType enum_from_string_##EnumType(const std::string& str) { \
+        if (str == #v1) return EnumType::v1; \
+        if (str == #v2) return EnumType::v2; \
+        throw std::runtime_error("invalid enum string: " + str); \
+    } \
+    template<> \
+    struct serializer<EnumType> { \
+        static json to_json(const EnumType& value) { \
+            return json(enum_to_string_##EnumType(value)); \
+        } \
+        static EnumType from_json(const json& j) { \
+            return enum_from_string_##EnumType(j.as_string()); \
+        } \
+    }; \
+    }
+
+// 3 values
+#define CPPX_ENUM_SERIALIZABLE_3(EnumType, v1, v2, v3) \
+    namespace cppx { \
+    inline std::string enum_to_string_##EnumType(EnumType value) { \
+        switch (value) { \
+            CPPX_ENUM_CASE(EnumType, v1) \
+            CPPX_ENUM_CASE(EnumType, v2) \
+            CPPX_ENUM_CASE(EnumType, v3) \
+            default: return "Unknown"; \
+        } \
+    } \
+    inline EnumType enum_from_string_##EnumType(const std::string& str) { \
+        if (str == #v1) return EnumType::v1; \
+        if (str == #v2) return EnumType::v2; \
+        if (str == #v3) return EnumType::v3; \
+        throw std::runtime_error("invalid enum string: " + str); \
+    } \
+    template<> \
+    struct serializer<EnumType> { \
+        static json to_json(const EnumType& value) { \
+            return json(enum_to_string_##EnumType(value)); \
+        } \
+        static EnumType from_json(const json& j) { \
+            return enum_from_string_##EnumType(j.as_string()); \
+        } \
+    }; \
+    }
+
+// 4 values
+#define CPPX_ENUM_SERIALIZABLE_4(EnumType, v1, v2, v3, v4) \
+    namespace cppx { \
+    inline std::string enum_to_string_##EnumType(EnumType value) { \
+        switch (value) { \
+            CPPX_ENUM_CASE(EnumType, v1) \
+            CPPX_ENUM_CASE(EnumType, v2) \
+            CPPX_ENUM_CASE(EnumType, v3) \
+            CPPX_ENUM_CASE(EnumType, v4) \
+            default: return "Unknown"; \
+        } \
+    } \
+    inline EnumType enum_from_string_##EnumType(const std::string& str) { \
+        if (str == #v1) return EnumType::v1; \
+        if (str == #v2) return EnumType::v2; \
+        if (str == #v3) return EnumType::v3; \
+        if (str == #v4) return EnumType::v4; \
+        throw std::runtime_error("invalid enum string: " + str); \
+    } \
+    template<> \
+    struct serializer<EnumType> { \
+        static json to_json(const EnumType& value) { \
+            return json(enum_to_string_##EnumType(value)); \
+        } \
+        static EnumType from_json(const json& j) { \
+            return enum_from_string_##EnumType(j.as_string()); \
+        } \
+    }; \
+    }
+
+// 5 values
+#define CPPX_ENUM_SERIALIZABLE_5(EnumType, v1, v2, v3, v4, v5) \
+    namespace cppx { \
+    inline std::string enum_to_string_##EnumType(EnumType value) { \
+        switch (value) { \
+            CPPX_ENUM_CASE(EnumType, v1) \
+            CPPX_ENUM_CASE(EnumType, v2) \
+            CPPX_ENUM_CASE(EnumType, v3) \
+            CPPX_ENUM_CASE(EnumType, v4) \
+            CPPX_ENUM_CASE(EnumType, v5) \
+            default: return "Unknown"; \
+        } \
+    } \
+    inline EnumType enum_from_string_##EnumType(const std::string& str) { \
+        if (str == #v1) return EnumType::v1; \
+        if (str == #v2) return EnumType::v2; \
+        if (str == #v3) return EnumType::v3; \
+        if (str == #v4) return EnumType::v4; \
+        if (str == #v5) return EnumType::v5; \
+        throw std::runtime_error("invalid enum string: " + str); \
+    } \
+    template<> \
+    struct serializer<EnumType> { \
+        static json to_json(const EnumType& value) { \
+            return json(enum_to_string_##EnumType(value)); \
+        } \
+        static EnumType from_json(const json& j) { \
+            return enum_from_string_##EnumType(j.as_string()); \
+        } \
+    }; \
+    }
+
+/**
+ * CPPX_ENUM_SERIALIZABLE - Register an enum for serialization (supports 1-5 values)
+ * 
+ * Usage:
+ *   enum class Priority { Low, Medium, High };
+ *   CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High)
+ */
+#define CPPX_ENUM_SERIALIZABLE(...) \
+    CPPX_GET_MACRO6(__VA_ARGS__, \
+        CPPX_ENUM_SERIALIZABLE_5, \
+        CPPX_ENUM_SERIALIZABLE_4, \
+        CPPX_ENUM_SERIALIZABLE_3, \
+        CPPX_ENUM_SERIALIZABLE_2, \
+        CPPX_ENUM_SERIALIZABLE_1, \
+        invalid \
+    )(__VA_ARGS__)
