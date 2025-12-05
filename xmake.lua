@@ -1,0 +1,69 @@
+-- cppx: Modern C++20 Module-based Utility Library
+-- Project configuration
+
+set_project("cppx")
+set_version("0.1.0")
+set_xmakever("2.8.0")
+
+-- Set C++20 standard with modules support
+set_languages("c++23", "cxx23")
+
+-- Add build modes
+add_rules("mode.debug", "mode.release")
+
+-- MSVC-only configuration for C++20 modules with import std
+
+if is_mode("debug") then
+    set_optimize("none")
+    set_symbols("debug")
+else
+    set_optimize("fastest")
+end
+
+-- Main library target
+target("cppx")
+    set_kind("static")
+    
+    -- Add module files as public so dependent targets can use them
+    add_files("src/*.cppm", {public = true})
+    
+    -- Set module directory
+    set_policy("build.c++.modules", true)
+    
+    -- Export module directories for dependent targets
+    add_includedirs("src", {public = true})
+    
+    -- Install headers
+    add_installfiles("src/*.cppm", {prefixdir = "include/cppx"})
+    
+    -- MSVC flags for C++20 modules and import std
+    add_cxxflags("/utf-8", {tools = "cl"})
+    add_syslinks("ws2_32", "user32")
+
+    -- Enable warnings
+    set_warnings("all")
+
+target_end()
+
+-- Optional: shared library version
+target("cppx_shared")
+    set_kind("shared")
+    add_files("src/*.cppm", {public = true})
+    set_policy("build.c++.modules", true)
+    add_includedirs("src", {public = true})
+    
+    -- MSVC flags for C++20 modules and import std
+    add_cxxflags("/utf-8", {tools = "cl"})
+    add_syslinks("ws2_32", "user32")
+    
+    set_warnings("all")
+    set_enabled(false) -- Disabled by default, enable with: xmake f --cppx_shared=y
+target_end()
+
+-- ===========================================================================
+-- Tests and Examples (from subdirectories)
+-- ===========================================================================
+
+includes("tests")
+includes("examples")
+
