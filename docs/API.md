@@ -13,6 +13,7 @@ Complete API reference for all modules in the cppx library.
 6. [cppx.concurrent](#cppxconcurrent)
 7. [cppx.math_utils](#cppxmath_utils)
 8. [cppx.cli](#cppxcli)
+9. [cppx.test](#cppxtest) ⭐ NEW
 
 ---
 
@@ -886,9 +887,288 @@ void process(std::string_view text) {
 
 ---
 
+## cppx.test
+
+Modern C++23 module-based testing framework with Catch2-style syntax.
+
+### Quick Start
+
+```cpp
+import std;
+import cppx.test;
+import cppx.logging;
+
+#include "src/test_macros.h"
+
+using namespace cppx;
+
+TEST_CASE("Basic test", "[basic]") {
+    REQUIRE(1 + 1 == 2);
+    CHECK(true);
+}
+
+int main() {
+    test_runner runner;
+    auto results = runner.run_all();
+    return runner.failed_count() == 0 ? 0 : 1;
+}
+```
+
+### TEST_CASE Macro
+
+Define a test case with optional tags.
+
+```cpp
+TEST_CASE("Test name", "[tag1][tag2]") {
+    // Test body
+}
+```
+
+**Parameters:**
+- `name` - Test case name (string)
+- `tags` - Optional tags for filtering (e.g., `[fast][unit]`)
+
+### Assertion Macros
+
+#### Basic Assertions
+
+```cpp
+REQUIRE(condition);              // Fails and stops test if false
+REQUIRE_MSG(condition, "msg");   // With custom message
+
+CHECK(condition);                // Fails but continues test
+CHECK_MSG(condition, "msg");     // With custom message
+```
+
+#### Comparison Assertions
+
+```cpp
+REQUIRE_EQ(a, b);    // a == b
+REQUIRE_NE(a, b);    // a != b
+REQUIRE_LT(a, b);    // a < b
+REQUIRE_LE(a, b);    // a <= b
+REQUIRE_GT(a, b);    // a > b
+REQUIRE_GE(a, b);    // a >= b
+
+// CHECK variants work the same way
+CHECK_EQ(a, b);
+CHECK_NE(a, b);
+// ...
+```
+
+#### Exception Testing
+
+```cpp
+REQUIRE_THROWS(expression);      // Must throw any exception
+REQUIRE_NOTHROW(expression);     // Must not throw
+```
+
+**Example:**
+```cpp
+TEST_CASE("Exception handling", "[exceptions]") {
+    REQUIRE_THROWS(throw std::runtime_error("error"));
+    
+    REQUIRE_NOTHROW(([]() {
+        int x = 42;
+    })());
+}
+```
+
+### SECTION Macro
+
+Organize tests into sections. Each section starts with a fresh copy of the test state.
+
+```cpp
+TEST_CASE("Vector operations", "[vector]") {
+    std::vector<int> v;
+    
+    REQUIRE(v.empty());
+    
+    SECTION("Adding elements") {
+        v.push_back(1);
+        REQUIRE(v.size() == 1);
+    }
+    
+    SECTION("Clearing") {
+        v.push_back(1);
+        v.clear();
+        REQUIRE(v.empty());
+    }
+}
+```
+
+### test_runner Class
+
+Main class for running tests.
+
+#### Constructor
+
+```cpp
+test_runner();  // Creates a test runner
+```
+
+#### Methods
+
+**`std::vector<test_result> run_all()`**
+
+Run all registered test cases.
+
+```cpp
+test_runner runner;
+auto results = runner.run_all();
+
+if (runner.failed_count() == 0) {
+    std::cout << "All tests passed!" << std::endl;
+}
+```
+
+**`std::vector<test_result> run_filtered(const std::string& filter)`**
+
+Run only tests matching the filter (by name or tag).
+
+```cpp
+test_runner runner;
+
+// Run only tests tagged with [fast]
+auto results = runner.run_filtered("fast");
+
+// Run tests with "string" in name
+auto results2 = runner.run_filtered("string");
+```
+
+**`size_t passed_count() const`**
+
+Get number of passed tests.
+
+**`size_t failed_count() const`**
+
+Get number of failed tests.
+
+**`size_t skipped_count() const`**
+
+Get number of skipped tests.
+
+### Data Structures
+
+#### test_result
+
+```cpp
+struct test_result {
+    std::string name;                           // Test name
+    test_status status;                         // passed/failed/skipped
+    std::vector<assertion_result> assertions;   // All assertions
+    std::chrono::milliseconds duration;         // Execution time
+    std::string error_message;                  // Error if failed
+};
+```
+
+#### assertion_result
+
+```cpp
+struct assertion_result {
+    bool passed;            // Did assertion pass?
+    std::string expression; // The expression text
+    std::string file;       // Source file
+    int line;              // Line number
+    std::string message;   // Optional message
+};
+```
+
+#### test_status
+
+```cpp
+enum class test_status {
+    passed,
+    failed,
+    skipped
+};
+```
+
+### Complete Example
+
+```cpp
+import std;
+import cppx.test;
+import cppx.logging;
+
+#include "src/test_macros.h"
+
+using namespace cppx;
+
+TEST_CASE("Math operations", "[math]") {
+    int a = 5;
+    int b = 10;
+    
+    REQUIRE_EQ(a + b, 15);
+    REQUIRE_LT(a, b);
+    REQUIRE_GT(b, a);
+}
+
+TEST_CASE("String operations", "[string]") {
+    std::string s = "hello";
+    
+    SECTION("Length check") {
+        REQUIRE_EQ(s.length(), 5);
+    }
+    
+    SECTION("Concatenation") {
+        s += " world";
+        REQUIRE_EQ(s, "hello world");
+    }
+}
+
+TEST_CASE("Container operations", "[container]") {
+    std::vector<int> v = {1, 2, 3};
+    
+    REQUIRE(v.size() == 3);
+    CHECK_EQ(v[0], 1);
+    CHECK_EQ(v[1], 2);
+    CHECK_EQ(v[2], 3);
+}
+
+int main() {
+    test_runner runner;
+    auto results = runner.run_all();
+    
+    return runner.failed_count() == 0 ? 0 : 1;
+}
+```
+
+### Integration with xmake
+
+```lua
+target("my_test")
+    set_kind("binary")
+    add_files("my_test.cpp")
+    add_deps("cppx")
+    set_policy("build.c++.modules", true)
+    add_cxxflags("/utf-8", {tools = "cl"})
+    add_tests("default", {runargs = {}, pass_outputs = ".*passed.*"})
+target_end()
+```
+
+Then run:
+```bash
+xmake test
+```
+
+For more details, see [TEST_FRAMEWORK.md](TEST_FRAMEWORK.md).
+
+---
+
 ## Examples
 
-See the [examples](../examples/) directory for complete, runnable examples of each module.
+See the [examples](../examples/) directory for complete, runnable examples of each module:
+
+- `error_demo.cpp` - Error handling with expected<T,E>
+- `string_utils_demo.cpp` - String manipulation utilities
+- `file_system_demo.cpp` - File I/O and filesystem operations
+- `logging_demo.cpp` - Logging system with levels and formatting
+- `time_utils_demo.cpp` - Time utilities and formatters
+- `concurrent_demo.cpp` - Concurrency primitives
+- `math_utils_demo.cpp` - Mathematical operations
+- `cli_demo.cpp` - Command-line argument parsing
+- `test_demo.cpp` - Testing framework demonstration ⭐
 
 ## License
 
