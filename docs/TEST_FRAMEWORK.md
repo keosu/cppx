@@ -1,10 +1,10 @@
-# cppx.test - Modern C++20 Module-Based Testing Framework
+# cppx.test - Modern c++23 Module-Based Testing Framework
 
-A Catch2-inspired testing framework built with C++20 modules and `import std`.
+A Catch2-inspired testing framework built with c++23 modules and `import std`.
 
 ## Features
 
-- ✅ **Modern C++20**: Full module support with `import std`
+- ✅ **Modern c++23**: Full module support with `import std`
 - ✅ **Catch2-style syntax**: Familiar TEST_CASE, SECTION, REQUIRE/CHECK macros
 - ✅ **Rich assertions**: Comparison operators, exception testing
 - ✅ **Detailed reporting**: Colorful output with pass/fail statistics
@@ -202,7 +202,7 @@ See the complete examples in:
 - Detailed output
 
 ### Differences
-- ✅ Pure C++20 modules
+- ✅ Pure c++23 modules
 - ✅ Integrated with cppx.logging
 - ✅ Simpler implementation (educational)
 - ❌ No BDD-style SCENARIO/GIVEN/WHEN/THEN (yet)

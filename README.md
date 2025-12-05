@@ -1,6 +1,6 @@
-# cppx - C++20 Module 基础库
+# cppx - c++23 Module 基础库
 
-现代化、零依赖的 C++20 模块库，使用 MSVC 和 `import std` 特性。
+现代化、零依赖的 c++23 模块库，使用 MSVC 和 `import std` 特性。
 
 ## 特性
 
@@ -114,13 +114,13 @@ int main() {
 
 - **编译器**: MSVC 19.44+ (Visual Studio 2022)
 - **构建工具**: xmake 2.8+
-- **C++ 标准**: C++23 (使用 `/std:c++20`)
+- **C++ 标准**: C++23 (使用 `/std:c++23`)
 - **平台**: Windows
 
 **重要**: 
 - 本项目仅支持 MSVC 编译器
 - 使用 `import std` 特性，需要 Visual Studio 2022 或更新版本
-- 之前的 Clang/GCC 支持已移除，因为它们在 C++20 modules 方面存在问题
+- 之前的 Clang/GCC 支持已移除，因为它们在 c++23 modules 方面存在问题
 
 ## 迁移说明
 

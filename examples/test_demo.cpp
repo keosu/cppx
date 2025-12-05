@@ -1,4 +1,4 @@
-// Demo of cppx.test - A modern C++20 module-based testing framework
+// Demo of cppx.test - A modern c++23 module-based testing framework
 
 import std;
 import cppx.test;

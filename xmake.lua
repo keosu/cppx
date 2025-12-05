@@ -1,17 +1,17 @@
--- cppx: Modern C++20 Module-based Utility Library
+-- cppx: Modern c++23 Module-based Utility Library
 -- Project configuration
 
 set_project("cppx")
 set_version("0.1.0")
 set_xmakever("2.8.0")
 
--- Set C++20 standard with modules support
+-- Set c++23 standard with modules support
 set_languages("c++23", "cxx23")
 
 -- Add build modes
 add_rules("mode.debug", "mode.release")
 
--- MSVC-only configuration for C++20 modules with import std
+-- MSVC-only configuration for c++23 modules with import std
 
 if is_mode("debug") then
     set_optimize("none")
@@ -30,8 +30,11 @@ target("cppx")
     -- Set module directory
     set_policy("build.c++.modules", true)
     
-    -- Export module directories for dependent targets (让依赖的 target 能找到模块)
+    -- Export include and module directories for dependent targets
     add_includedirs("src", {public = true})
+    
+    -- 导出模块目录，让依赖的 target 可以找到编译好的模块
+    add_moduledirs("src", {public = true})
     
     -- Add header files for macros
     add_headerfiles("src/*.h", {public = true})
@@ -40,7 +43,7 @@ target("cppx")
     add_installfiles("src/*.cppm", {prefixdir = "include/cppx"})
     add_installfiles("src/*.h", {prefixdir = "include/cppx"})
     
-    -- MSVC flags for C++20 modules and import std
+    -- MSVC flags for c++23 modules and import std
     add_cxxflags("/utf-8", {tools = "cl"})
     add_syslinks("ws2_32", "user32")
 
@@ -56,7 +59,7 @@ target("cppx_shared")
     set_policy("build.c++.modules", true)
     add_includedirs("src", {public = true})
     
-    -- MSVC flags for C++20 modules and import std
+    -- MSVC flags for c++23 modules and import std
     add_cxxflags("/utf-8", {tools = "cl"})
     add_syslinks("ws2_32", "user32")
     
