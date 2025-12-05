@@ -34,4 +34,4 @@ add_cppx_test("test_math_utils", "test_math_utils.cpp")
 add_cppx_test("test_logging", "test_logging.cpp")
 add_cppx_test("test_cli", "test_cli.cpp")
 add_cppx_test("test_test", "test_test.cpp")
--- add_cppx_test("test_serialization", "test_serialization.cpp")  -- TEST_CASE macro issue, needs fix
+add_cppx_test("test_serialization", "test_serialization_simple.cpp")

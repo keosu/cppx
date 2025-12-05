@@ -91,6 +91,53 @@ int main() {
         }
         logger4->debug("Calculation result: {}", sum);
     }
+
+    std::cout << "7. UTF-8 and Emoji Test:\n";
+    {
+        auto logger = get_logger("utf8_test");
+        
+        logger->info("=== UTF-8 and Emoji Test ===");
+        logger->info("");
+        
+        // Test checkmark and other symbols
+        logger->info("✓ Checkmark works!");
+        logger->info("✗ Cross mark");
+        logger->info("→ Arrow");
+        logger->info("• Bullet");
+        logger->info("★ Star");
+        logger->info("");
+        
+        // Test emojis
+        logger->info("😀 Grinning face");
+        logger->info("🎉 Party popper");
+        logger->info("🚀 Rocket");
+        logger->info("💻 Laptop");
+        logger->info("📊 Chart");
+        logger->info("🔧 Wrench");
+        logger->info("✨ Sparkles");
+        logger->info("🐛 Bug");
+        logger->info("🎯 Target");
+        logger->info("");
+        
+        // Test Chinese
+        logger->info("中文测试 - Chinese test");
+        logger->info("你好世界！- Hello World!");
+        logger->info("");
+        
+        // Test Japanese
+        logger->info("日本語テスト - Japanese test");  
+        logger->info("こんにちは世界！- Hello World!");
+        logger->info("");
+        
+        // Test combined
+        logger->info("✓ Build successful 🎉");
+        logger->info("⚠️ Warning: Test mode");
+        logger->info("❌ Error detected 🐛");
+        logger->info("📦 Package ready 🚀");
+        logger->info("");
+        
+        logger->info("=== All UTF-8 characters displayed correctly! ===");
+    }
     
     std::cout << "\n=== Demo completed ===\n";
     return 0;

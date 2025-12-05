@@ -1,6 +1,16 @@
 // cppx.logging - Lightweight logging system
 // Provides leveled logging with color support and file rotation
 
+module;
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <io.h>
+#include <fcntl.h>
+#include <cstdio>
+#endif
+
 export module cppx.logging;
 
 import std;
@@ -92,14 +102,61 @@ public:
     virtual void flush() = 0;
 };
 
-// Console sink
+// Console sink with UTF-8 and emoji support
 class console_sink : public log_sink {
 public:
     explicit console_sink(bool use_color = true)
-        : use_color_(use_color) {}
+        : use_color_(use_color) 
+    {
+        // Enable UTF-8 output on Windows
+        #ifdef _WIN32
+        // Set console output code page to UTF-8
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+        
+        // Enable ANSI escape sequences on Windows 10+
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hOut != INVALID_HANDLE_VALUE) {
+            DWORD dwMode = 0;
+            if (GetConsoleMode(hOut, &dwMode)) {
+                dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+                SetConsoleMode(hOut, dwMode);
+            }
+        }
+        
+        // Store console handle
+        console_handle_ = hOut;
+        
+        // Check if output is redirected (e.g., piped to xmake test)
+        // If redirected, GetFileType returns FILE_TYPE_PIPE or FILE_TYPE_DISK
+        DWORD type = GetFileType(hOut);
+        is_redirected_ = (type != FILE_TYPE_CHAR);
+        #endif
+    }
     
     void write(const std::string& message) override {
+        #ifdef _WIN32
+        // If output is redirected (e.g., xmake test captures stdout),
+        // use standard streams for compatibility
+        if (is_redirected_) {
+            std::cout << message << std::endl;
+        } else {
+            // Use WriteConsoleW for proper UTF-8 support on Windows console
+            // Convert UTF-8 to UTF-16
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, message.c_str(), -1, nullptr, 0);
+            if (wlen > 0) {
+                std::vector<wchar_t> wbuf(wlen + 1);
+                MultiByteToWideChar(CP_UTF8, 0, message.c_str(), -1, wbuf.data(), wlen);
+                
+                // Write to console
+                DWORD written = 0;
+                WriteConsoleW(console_handle_, wbuf.data(), wlen - 1, &written, nullptr);
+                WriteConsoleW(console_handle_, L"\n", 1, &written, nullptr);
+            }
+        }
+        #else
         std::cout << message << std::endl;
+        #endif
     }
     
     void flush() override {
@@ -110,6 +167,10 @@ public:
 
 private:
     bool use_color_;
+    #ifdef _WIN32
+    HANDLE console_handle_;
+    bool is_redirected_ = false;  // True if output is redirected/piped
+    #endif
 };
 
 // File sink with rotation

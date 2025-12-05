@@ -1,5 +1,5 @@
 // cppx.serialization - Macro definitions
-// Simplified macros for MSVC + C++20 modules compatibility
+// Automatic parameter counting for MSVC + C++20 modules compatibility
 
 #pragma once
 
@@ -16,6 +16,27 @@
     if (json_obj.contains(#field)) { \
         obj.field = cppx::serializer<std::remove_cvref_t<decltype(obj.field)>>::from_json(json_obj[#field]); \
     }
+
+// ============================================================================
+// Argument counting macros (MSVC compatible)
+// ============================================================================
+
+// Helper to expand arguments  
+#define CPPX_EXPAND(...) __VA_ARGS__
+
+// Count fields (excluding Type parameter)
+// When called with (Type, f1, f2), we want to return 2
+// _1=Type, _2=f1, _3=f2, so we skip _1 and count from _2
+#define CPPX_COUNT_FIELDS(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, N, ...) N
+#define CPPX_FIELD_COUNT(...) CPPX_EXPAND(CPPX_COUNT_FIELDS(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+
+// Concatenate macro names
+#define CPPX_CONCAT(a, b) a##b
+#define CPPX_CONCAT2(a, b) CPPX_CONCAT(a, b)
+
+// Select the right macro based on field count
+#define CPPX_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT2(CPPX_SERIALIZABLE_, N)
+#define CPPX_ENUM_SERIALIZABLE_DISPATCH(N) CPPX_CONCAT2(CPPX_ENUM_SERIALIZABLE_, N)
 
 // ============================================================================
 // Serialization macros for different field counts (1-10 fields)
@@ -221,46 +242,97 @@
     }; \
     }
 
-// ============================================================================
-// Macro overloading based on argument count
-// ============================================================================
+// 9 fields
+#define CPPX_SERIALIZABLE_9(Type, f1, f2, f3, f4, f5, f6, f7, f8, f9) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            CPPX_SER_FIELD(value, f6) \
+            CPPX_SER_FIELD(value, f7) \
+            CPPX_SER_FIELD(value, f8) \
+            CPPX_SER_FIELD(value, f9) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            CPPX_DESER_FIELD(value, j_param, f6) \
+            CPPX_DESER_FIELD(value, j_param, f7) \
+            CPPX_DESER_FIELD(value, j_param, f8) \
+            CPPX_DESER_FIELD(value, j_param, f9) \
+            return value; \
+        } \
+    }; \
+    }
 
-// Count arguments: Type + fields, so 2 args = 1 field, 3 args = 2 fields, etc.
-#define CPPX_GET_MACRO2(_1, _2, NAME, ...) NAME
-#define CPPX_GET_MACRO3(_1, _2, _3, NAME, ...) NAME
-#define CPPX_GET_MACRO4(_1, _2, _3, _4, NAME, ...) NAME
-#define CPPX_GET_MACRO5(_1, _2, _3, _4, _5, NAME, ...) NAME
-#define CPPX_GET_MACRO6(_1, _2, _3, _4, _5, _6, NAME, ...) NAME
-#define CPPX_GET_MACRO7(_1, _2, _3, _4, _5, _6, _7, NAME, ...) NAME
-#define CPPX_GET_MACRO8(_1, _2, _3, _4, _5, _6, _7, _8, NAME, ...) NAME
-#define CPPX_GET_MACRO9(_1, _2, _3, _4, _5, _6, _7, _8, _9, NAME, ...) NAME
+// 10 fields
+#define CPPX_SERIALIZABLE_10(Type, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) \
+    namespace cppx { \
+    template<> \
+    struct serializer<Type> { \
+        static json to_json(const Type& value) { \
+            auto j = json::object(); \
+            CPPX_SER_FIELD(value, f1) \
+            CPPX_SER_FIELD(value, f2) \
+            CPPX_SER_FIELD(value, f3) \
+            CPPX_SER_FIELD(value, f4) \
+            CPPX_SER_FIELD(value, f5) \
+            CPPX_SER_FIELD(value, f6) \
+            CPPX_SER_FIELD(value, f7) \
+            CPPX_SER_FIELD(value, f8) \
+            CPPX_SER_FIELD(value, f9) \
+            CPPX_SER_FIELD(value, f10) \
+            return j; \
+        } \
+        static Type from_json(const json& j_param) { \
+            Type value{}; \
+            CPPX_DESER_FIELD(value, j_param, f1) \
+            CPPX_DESER_FIELD(value, j_param, f2) \
+            CPPX_DESER_FIELD(value, j_param, f3) \
+            CPPX_DESER_FIELD(value, j_param, f4) \
+            CPPX_DESER_FIELD(value, j_param, f5) \
+            CPPX_DESER_FIELD(value, j_param, f6) \
+            CPPX_DESER_FIELD(value, j_param, f7) \
+            CPPX_DESER_FIELD(value, j_param, f8) \
+            CPPX_DESER_FIELD(value, j_param, f9) \
+            CPPX_DESER_FIELD(value, j_param, f10) \
+            return value; \
+        } \
+    }; \
+    }
+
+// ============================================================================
+// Main macro with automatic parameter counting
+// ============================================================================
 
 /**
- * CPPX_SERIALIZABLE - Register a type for serialization (supports 1-8 fields)
+ * CPPX_SERIALIZABLE - Register a type for serialization (supports 1-10 fields)
+ * Automatically detects the number of fields!
  * 
  * Usage:
  *   struct Point { int x, y; };
- *   CPPX_SERIALIZABLE(Point, x, y)
+ *   CPPX_SERIALIZABLE(Point, x, y)  // Auto-detects 2 fields!
  * 
  *   struct Person { 
  *       std::string name;
  *       int age;
  *       std::vector<std::string> hobbies;
  *   };
- *   CPPX_SERIALIZABLE(Person, name, age, hobbies)
+ *   CPPX_SERIALIZABLE(Person, name, age, hobbies)  // Auto-detects 3 fields!
  */
 #define CPPX_SERIALIZABLE(...) \
-    CPPX_GET_MACRO9(__VA_ARGS__, \
-        CPPX_SERIALIZABLE_8, \
-        CPPX_SERIALIZABLE_7, \
-        CPPX_SERIALIZABLE_6, \
-        CPPX_SERIALIZABLE_5, \
-        CPPX_SERIALIZABLE_4, \
-        CPPX_SERIALIZABLE_3, \
-        CPPX_SERIALIZABLE_2, \
-        CPPX_SERIALIZABLE_1, \
-        invalid \
-    )(__VA_ARGS__)
+    CPPX_SERIALIZABLE_DISPATCH(CPPX_FIELD_COUNT(__VA_ARGS__))(__VA_ARGS__)
 
 // ============================================================================
 // Enum serialization macros
@@ -412,17 +484,11 @@
 
 /**
  * CPPX_ENUM_SERIALIZABLE - Register an enum for serialization (supports 1-5 values)
+ * Automatically detects the number of enum values!
  * 
  * Usage:
  *   enum class Priority { Low, Medium, High };
- *   CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High)
+ *   CPPX_ENUM_SERIALIZABLE(Priority, Low, Medium, High)  // Auto-detects 3 values!
  */
 #define CPPX_ENUM_SERIALIZABLE(...) \
-    CPPX_GET_MACRO6(__VA_ARGS__, \
-        CPPX_ENUM_SERIALIZABLE_5, \
-        CPPX_ENUM_SERIALIZABLE_4, \
-        CPPX_ENUM_SERIALIZABLE_3, \
-        CPPX_ENUM_SERIALIZABLE_2, \
-        CPPX_ENUM_SERIALIZABLE_1, \
-        invalid \
-    )(__VA_ARGS__)
+    CPPX_ENUM_SERIALIZABLE_DISPATCH(CPPX_FIELD_COUNT(__VA_ARGS__))(__VA_ARGS__)
