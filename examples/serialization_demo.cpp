@@ -1,11 +1,8 @@
-// Preview of cppx.serialization usage (NOT YET IMPLEMENTED)
-// This is a design preview - compile will fail until implementation is complete
-
 import std;
-import cppx.serialization;  // 待实现
+import cppx.serialization;
 import cppx.logging;
 
-#include "../src/serialization_macros.h"  // 待实现
+#include "../src/serialization_macros.h"
 
 using namespace cppx;
 
