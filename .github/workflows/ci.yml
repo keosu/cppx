@@ -41,13 +41,10 @@ jobs:
     - name: Install xmake
       run: |
         # Install latest xmake via PowerShell script
-        Invoke-WebRequest -Uri "https://xmake.io/psget.text" -UseBasicParsing | Invoke-Expression
-        
-        # Verify installation
-        & "C:\Program Files\xmake\xmake.exe" --version
+        Invoke-WebRequest -Uri "https://xmake.io/psget.text" -UseBasicParsing | Invoke-Expression 
         
         # Add xmake to PATH for this session
-        echo "C:\Program Files\xmake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "$env:ProgramFiles\xmake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     
     - name: Configure
       run: |
