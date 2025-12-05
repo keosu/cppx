@@ -75,3 +75,22 @@ target_end()
 includes("tests")
 includes("examples")
 
+-- ============================================================================
+-- Custom tasks
+-- ============================================================================
+
+-- Format task: format all source files using clang-format
+-- Implementation in scripts/format.lua
+task("format")
+    set_category("plugin")
+    on_run("scripts.format")
+    
+    set_menu {
+        usage = "xmake format [options]",
+        description = "Format C++ source files using clang-format",
+        options = {
+            {'c', "check", "k", nil, "Check formatting without modifying files"}
+        }
+    }
+task_end()
+
