@@ -40,22 +40,31 @@ jobs:
     
     - name: Install xmake
       run: |
-        Invoke-WebRequest -Uri "https://github.com/xmake-io/xmake/releases/download/v2.8.9/xmake-v2.8.9.win64.exe" -OutFile "xmake-installer.exe"
-        Start-Process -FilePath ".\xmake-installer.exe" -ArgumentList "/S" -Wait
-        echo "$env:ProgramFiles\xmake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # Install latest xmake
+        Invoke-WebRequest -Uri "https://xmake.io/psget.text" -UseBasicParsing | Invoke-Expression
+        
+        # Update to latest version
+        xmake --version
     
     - name: Configure
       run: |
+        # Clean and configure with absolute paths
+        xmake f -c
         xmake f -m ${{ matrix.mode }} -y -v
+        
+        # Show configuration
+        xmake show
     
     - name: Build
-      run: xmake -r -v
+      run: |
+        # Build with limited parallelism for C++20 modules
+        xmake -r -j 1 -v
     
     - name: Run tests
       run: xmake test -v
     
     - name: Build examples
-      run: xmake build -g examples -v
+      run: xmake build -g examples -j 1 -v
 
   # macOS build is currently disabled (MSVC-only project)
   # Uncomment when cross-platform support is added

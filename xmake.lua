@@ -11,6 +11,9 @@ set_languages("c++23", "cxx23")
 -- Add build modes
 add_rules("mode.debug", "mode.release")
 
+-- Improve C++20 modules compilation in CI environment
+set_policy("build.across_targets_in_parallel", false)  -- Build targets sequentially for module dependencies
+
 -- MSVC-only configuration for c++23 modules with import std
 
 if is_mode("debug") then
