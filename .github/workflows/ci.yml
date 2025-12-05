@@ -43,6 +43,14 @@ jobs:
       with:
         xmake-version: latest
     
+    - name: Check code formatting
+      uses: DoozyX/clang-format-lint-action@v0.18
+      with:
+        source: 'src tests examples'
+        extensions: 'cpp,cppm,h'
+        clangFormatVersion: 18
+        style: file  # 使用项目的 .clang-format 文件
+    
     - name: Configure
       run: |
         # Verify xmake is available

@@ -1,15 +1,15 @@
-# clang-format configuration for cppx project
-# Based on Microsoft/LLVM style with C++23 adjustments
+# clang-format configuration for cppx project 
 
-BasedOnStyle: Microsoft
+BasedOnStyle: Google
 
 # Language and standard
 Language: Cpp
 Standard: c++20
 
 # Indentation
-IndentWidth: 4
-TabWidth: 4
+IndentWidth: 2
+IndentPPDirectives: BeforeHash
+TabWidth: 2
 UseTab: Never
 ContinuationIndentWidth: 4
 ConstructorInitializerIndentWidth: 4
@@ -17,81 +17,10 @@ ConstructorInitializerIndentWidth: 4
 # Line length
 ColumnLimit: 100
 
-# Braces
-BreakBeforeBraces: Custom
-BraceWrapping:
-  AfterClass: false
-  AfterControlStatement: Never
-  AfterEnum: false
-  AfterFunction: false
-  AfterNamespace: false
-  AfterStruct: false
-  AfterUnion: false
-  BeforeCatch: false
-  BeforeElse: false
-  IndentBraces: false
-
-# Spacing
-SpaceAfterCStyleCast: false
-SpaceAfterLogicalNot: false
-SpaceAfterTemplateKeyword: true
-SpaceBeforeAssignmentOperators: true
-SpaceBeforeCpp11BracedList: false
-SpaceBeforeCtorInitializerColon: true
-SpaceBeforeInheritanceColon: true
-SpaceBeforeParens: ControlStatements
-SpaceBeforeRangeBasedForLoopColon: true
-SpaceInEmptyParentheses: false
-SpacesInAngles: false
-SpacesInCStyleCastParentheses: false
-SpacesInContainerLiterals: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
-
-# Alignment
-AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: false
-AlignConsecutiveDeclarations: false
-AlignEscapedNewlines: Left
-AlignOperands: true
-AlignTrailingComments: true
-
-# Pointers and references
-DerivePointerAlignment: false
-PointerAlignment: Left
-
 # Control statements
-AllowShortBlocksOnASingleLine: Empty
-AllowShortCaseLabelsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never
-AllowShortLoopsOnASingleLine: false
-
-# Includes
-IncludeBlocks: Regroup
-IncludeCategories:
-  # C++20/23 modules (import std, import cppx.*)
-  - Regex:           '^import '
-    Priority:        1
-  # Project headers
-  - Regex:           '^"'
-    Priority:        2
-  # System headers
-  - Regex:           '^<'
-    Priority:        3
-
-# Other formatting
-AccessModifierOffset: -4
-NamespaceIndentation: None
-SortIncludes: true
-SortUsingDeclarations: true
-MaxEmptyLinesToKeep: 2
-KeepEmptyLinesAtTheStartOfBlocks: false
-
-# C++20/23 specific
-SpaceBeforeCpp11BracedList: false
-Cpp11BracedListStyle: true
-
+AllowShortCaseLabelsOnASingleLine: true  # 允许短 case 在一行
+AllowShortIfStatementsOnASingleLine: WithoutElse  # 允许短 if（无 else）在一行
+ 
 # Comments
 ReflowComments: true
 CommentPragmas: '^ (TODO|FIXME|NOTE|BUG):'
