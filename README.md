@@ -13,12 +13,24 @@
 - ✅ **详细文档**: 完整的 API 文档和使用示例
 - ✅ **易于使用**: 简洁的 API 设计和辅助函数
 
+## 🔧 编译器要求
+
+**⚠️ 仅支持 Windows + MSVC (Visual Studio 2022+)**
+
+本项目使用 C++23 的 `import std` 特性，目前只有 MSVC 提供了完整、稳定的支持。
+
+**为什么不支持 Clang/GCC？**
+- Clang 虽然支持 `import std`，但需要复杂的配置和预编译
+- xmake 对 Clang 的 `import std` 支持还不完善
+- GCC 的 C++23 模块支持尚在开发中
+- 为保证项目的稳定性和易用性，目前只支持 MSVC
+
 ## 快速开始
 
 ### 1. 构建核心库
 
 ```bash
-# 配置项目 (需要 Windows + MSVC)
+# 配置项目
 xmake f -c
 
 # 编译核心库
