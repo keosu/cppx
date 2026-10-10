@@ -1,89 +1,90 @@
-# cppx - Modern C++23 Module Library
+# cppx
 
-现代化、零依赖的 C++23 模块库，使用 MSVC 和 `import std` 特性。
+面向跨平台产品的 C++23 通用基础库，提供错误处理、字符串、文件系统、日志、时间、并发、数学、命令行、JSON 序列化与测试工具。
 
-## ✨ 特性
+当前版本为 **0.1.0，工程化建设阶段**。现有实现采用 C++ modules 和 `import std`，当前验证平台是 Windows x64 + MSVC；Linux、macOS 的支持正在规划中。API、线程安全和分发能力仍在完善，尚未达到 1.0 的生产验收标准。
 
-- ✅ **现代 C++23**: 完全使用 `import std` 模块化标准库
-- ✅ **零依赖**: 仅依赖标准库，无第三方依赖
-- ✅ **9 个核心模块**: 错误处理、字符串、文件系统、日志、时间、并发、数学、CLI、测试框架
-- ✅ **类型安全**: `expected<T,E>` Rust 风格错误处理
-- ✅ **内置测试框架**: Catch2 风格的现代测试框架
-- ✅ **完整测试**: 100% 测试覆盖，所有测试通过
-- ✅ **详细文档**: 完整的 API 文档和使用示例
-- ✅ **易于使用**: 简洁的 API 设计和辅助函数
+本项目没有第三方运行时依赖。测试通过率不等于代码覆盖率，当前尚无经测量的覆盖率报告。
 
-## 🔧 编译器要求
+**构建与分发统一使用 xmake/xrepo 生态。** 目前保留命名模块接口，通过工具链探针验证跨平台能力。
 
-**⚠️ 仅支持 Windows + MSVC (Visual Studio 2022+)**
+## 建设方向
 
-本项目使用 C++23 的 `import std` 特性，目前只有 MSVC 提供了完整、稳定的支持。
+- [当前开发状态](docs/STATUS.md)：最近检查点、已完成验证和恢复工作的顺序。
+- [项目评估](docs/PROJECT_ASSESSMENT.md)：架构、已复现缺陷、风险优先级与验证边界。
+- [分阶段路线](docs/ROADMAP.md)：每个阶段的交付物、依赖和验收条件。
+- [跨平台技术方向](docs/decisions/0001-cross-platform-baseline.md)：工具链矩阵、公共接口与模块分发的选择。
+- [贡献与验证](CONTRIBUTING.md)：构建、回归测试和提交要求。
+- [xmake 接入与验证](docs/XMAKE_INTEGRATION.md)：源码接入、本地模块包、工具链探针和独立消费者。
 
-**为什么不支持 Clang/GCC？**
-- Clang 虽然支持 `import std`，但需要复杂的配置和预编译
-- xmake 对 Clang 的 `import std` 支持还不完善
-- GCC 的 C++23 模块支持尚在开发中
-- 为保证项目的稳定性和易用性，目前只支持 MSVC
+## 当前构建基线
 
-## 快速开始
+| 项目 | 当前基线 |
+|---|---|
+| 平台 | Windows x64 |
+| 编译器 | MSVC 19.44 / Visual Studio 2022 17.14 系列 |
+| 标准库 | 对应 MSVC STL，含 `std.ixx` |
+| 构建工具 | xmake 3.1.1 或更新版本；CI 固定 3.1.1 |
+| 语言 | C++23；具体编译选项由 xmake 选择 |
+| 格式工具 | clang-format 18 |
 
-### 1. 构建核心库
+较新的工具链需要通过相同验证后才能加入支持矩阵。有关平台状态，参见 [编译器说明](docs/COMPILER_NOTES.md)。
 
-```bash
-# 配置项目
-xmake f -c
+## 构建与测试
 
-# 编译核心库
-xmake build cppx
+安装 Visual Studio 的“使用 C++ 的桌面开发”工作负载及 Windows SDK，然后在仓库根目录执行：
 
-# 产物: build/windows/x64/release/cppx.lib
-```
-
-### 2. 运行测试
-
-```bash
-# 运行所有测试
+```powershell
+xmake f -c -p windows -a x64 -m debug -y
+xmake build -j 2
 xmake test
 
-# 运行单个测试
-xmake build test_error
+xmake f -c -p windows -a x64 -m release -y
+xmake build -j 2
+xmake test
+```
+
+默认构建库、11 个测试程序和 10 个示例。每个测试程序超时为 60 秒，测试结果以进程退出码判定。`test_runner_contract` 通过独立检查验证测试框架自身的失败检测、SECTION 隔离和断言保留行为。
+
+源码作为子项目嵌入时，测试和示例默认关闭。单独配置库也可使用：
+
+```powershell
+xmake f -c --cppx_build_tests=n --cppx_build_examples=n
+xmake build cppx
+xmake check-toolchain --require=all
+xmake verify-consumer --mode=release
+```
+
+探针与消费者检查使用独立的配置、构建目录，并生成 JSON 报告和配置/构建/运行日志。
+
+```powershell
+# 只构建核心库
+xmake build cppx
+
+# 运行一个测试或示例
 xmake run test_error
-
-# 测试结果
-# 100% tests passed, 0 test(s) failed out of 9
+xmake run error_demo
+xmake run serialization_demo
 ```
 
-### 3. 编译和运行示例
+## 模块
 
-```bash
-# 编译所有示例（默认会自动构建）
-xmake
+| 模块 | 主要能力 |
+|---|---|
+| `cppx.error` | `expected<T, E>`、错误上下文、异常转换 |
+| `cppx.string_utils` | 分割、拼接、修剪、数值转换和正则 |
+| `cppx.file_system` | 文件读写、路径操作、临时文件与目录 |
+| `cppx.logging` | 日志级别、控制台、文件输出和轮转 |
+| `cppx.time_utils` | 时间格式、解析、计时和定时器 |
+| `cppx.concurrent` | 线程池、channel、阻塞队列和并行算法 |
+| `cppx.math_utils` | 统计、插值、随机数和向量运算 |
+| `cppx.cli` | 参数、选项、子命令和帮助信息 |
+| `cppx.serialization` | JSON、结构体与枚举序列化 |
+| `cppx.test` | 测试注册、断言、SECTION 和报告 |
 
-# 运行示例
-xmake run error_demo          # 错误处理示例
-xmake run logging_demo        # 日志系统示例
-xmake run concurrent_demo     # 并发编程示例
-xmake run test_demo           # 测试框架示例
-# ... 更多示例
-```
+各模块的已知限制见项目评估；尤其应先修复 JSON 数据保真、时间解析和并发生命周期问题，再将其作为产品基础设施。
 
-## 📦 模块列表
-
-| 模块 | 功能 | 行数 |
-|------|------|------|
-| **cppx.error** | expected<T,E>, error_info, 错误处理 | ~170 |
-| **cppx.string_utils** | split, join, trim, 正则表达式等 | ~570 |
-| **cppx.file_system** | 文件读写, 临时文件, 路径操作 | ~380 |
-| **cppx.logging** | 分级日志, 彩色输出, 格式化 | ~260 |
-| **cppx.time_utils** | ISO8601, 计时器, 定时任务 | ~420 |
-| **cppx.concurrent** | 线程池, channel, 并发原语 | ~630 |
-| **cppx.math_utils** | 统计, 插值, 随机数, 向量运算 | ~400 |
-| **cppx.cli** | 命令行解析, 参数验证 | ~470 |
-| **cppx.test** | Catch2 风格测试框架 | ~360 |
-
-## 💡 使用示例
-
-### 基础用法
+## 使用示例
 
 ```cpp
 import std;
@@ -91,125 +92,42 @@ import cppx.error;
 import cppx.string_utils;
 import cppx.logging;
 
-using namespace cppx;
-
 int main() {
-    // 日志系统
-    auto logger = get_logger("myapp");
-    logger->info("Application started");
-    
-    // 字符串操作
-    auto parts = split("a,b,c", ",");
-    logger->info("Parts: {}", join(parts, " | "));
-    
-    // 错误处理
-    auto result = expected<int, std::string>::ok(42);
-    if (result.is_ok()) {
-        logger->info("Result: {}", result.value());
-    }
-    
-    return 0;
+    auto log = cppx::get_logger("myapp");
+    auto parts = cppx::split("a,b,c", ",");
+    log->info("Parts: {}", cppx::join(parts, " | "));
+
+    auto result = cppx::expected<int, cppx::error_info>::ok(42);
+    log->info("Result: {}", result.value());
 }
 ```
 
-### 使用测试框架
-
-```cpp
-import std;
-import cppx.test;
-import cppx.logging;
-
-#include "src/test_macros.h"
-
-using namespace cppx;
-
-TEST_CASE("String operations", "[string]") {
-    std::string s = "hello";
-    
-    REQUIRE(s.length() == 5);
-    REQUIRE_EQ(s, "hello");
-    
-    SECTION("Appending") {
-        s += " world";
-        REQUIRE_EQ(s, "hello world");
-    }
-}
-
-int main() {
-    test_runner runner;
-    auto results = runner.run_all();
-    return runner.failed_count() == 0 ? 0 : 1;
-}
-```
-
-## 🔧 在你的项目中使用
-
-### 方式 1: 通过 xmake 依赖
+支持通过 `includes + add_deps` 源码接入，以及 `xmake package` 生成本地包后通过 `add_repositories + add_requires + add_packages` 接入。后者会使用包内的模块源码和元数据生成消费者需要的接口；单独复制 `cppx.lib` 不能满足 `import cppx.*` 的需求。
 
 ```lua
--- 你的 xmake.lua
+-- 在父项目中包含本仓库，路径按实际布局调整。
+includes("third_party/cppx")
+
 target("myapp")
     set_kind("binary")
+    set_languages("c++23")
     add_files("main.cpp")
-    add_deps("cppx")  -- 依赖 cppx 库
+    add_deps("cppx")
     set_policy("build.c++.modules", true)
-    add_cxxflags("/utf-8", {tools = "cl"})
+    add_cxxflags("/utf-8", "/Zc:preprocessor", {tools = "cl"})
 target_end()
 ```
 
-### 方式 2: 直接链接库文件
+该源码接入方式默认只引入 `cppx` 库 target。完整本地包示例和匹配工具链/构建模式的要求见 [xmake 接入文档](docs/XMAKE_INTEGRATION.md)。当前提供静态库，不提供稳定的 DLL ABI 或跨编译器通用 BMI/IFC 文件。
 
-```bash
-# 编译你的程序
-cl /std:c++latest /utf-8 main.cpp cppx.lib
-```
+## 参考文档
 
-## 📚 文档
+- [API 参考](docs/API.md)
+- [测试框架](docs/TEST_FRAMEWORK.md)
+- [序列化宏](docs/SERIALIZATION_MACROS.md)
+- [格式约定](docs/FORMATTING.md)
+- [示例源码](examples/)
 
-- **[docs/API.md](docs/API.md)** - 完整 API 参考文档
-- **[docs/TEST_FRAMEWORK.md](docs/TEST_FRAMEWORK.md)** - 测试框架使用指南
-- **examples/** - 9 个完整示例程序
-- **tests/** - 9 个单元测试
+部分早期 API/设计文档仍需逐项校验；能力与支持范围以当前代码、测试和项目评估为准。
 
-## 系统要求
-
-- **编译器**: MSVC 19.44+ (Visual Studio 2022)
-- **构建工具**: xmake 2.8+
-- **C++ 标准**: C++23 (使用 `/std:c++20`)
-- **平台**: Windows
-
-**重要**: 
-- 本项目仅支持 MSVC 编译器
-- 使用 `import std` 特性，需要 Visual Studio 2022 或更新版本
-- 之前的 Clang/GCC 支持已移除，因为它们在 C++20 modules 方面存在问题
-
-## 📊 项目统计
-
-- **核心代码**: ~3,600 行 C++23 模块代码
-- **测试代码**: ~1,200 行测试代码
-- **示例代码**: ~1,100 行示例代码
-- **文档**: ~1,300 行文档
-- **测试覆盖**: 100% (9/9 测试通过)
-
-## 📄 许可证
-
-MIT License
-
-## ✅ 项目状态
-
-- ✅ **核心库**: 完全可用，生产就绪
-- ✅ **测试**: 100% 通过 (9/9)
-- ✅ **示例**: 全部运行正常
-- ✅ **文档**: 完整且最新
-- ✅ **构建系统**: 简洁高效
-
-### 近期更新
-
-- 🆕 新增 **cppx.test** 测试框架（Catch2 风格）
-- 🔧 简化 xmake 配置，使用辅助函数
-- 📝 完善文档和示例
-- 🧪 所有模块经过严格测试
-
----
-
-**Ready for production use!** 核心库功能完整，已在 MSVC 上完全测试通过。
+MIT License，见 [LICENSE](LICENSE)。

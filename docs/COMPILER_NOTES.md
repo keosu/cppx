@@ -1,97 +1,45 @@
-# 编译器支持说明
+# 编译器与平台状态
 
-## 当前支持
+更新日期：2026-10-10。
 
-**仅支持: Windows + MSVC (Visual Studio 2022+)**
+cppx 的产品目标是跨平台通用 C++23 基础库。目前的源码使用命名模块和 `import std`，当前验证平台仍为 Windows x64 + MSVC。
 
-## 为什么不支持 Clang/GCC？
+## 已验证组合
 
-### C++23 `import std` 的现状
+| 组件 | 本地审查使用的版本 |
+|---|---|
+| Visual Studio | 2022 Community 17.14.41 |
+| MSVC 工具集 | 14.44.35207（19.44 系列） |
+| 标准库模块 | 同一工具集提供的 `std.ixx` |
+| xmake | 3.1.1+HEAD.3ba37a0d4 |
+| 构建模式 | Debug、Release，x64 |
+| clang-format | 18.1.8 |
 
-本项目大量使用 C++23 的 `import std` 特性。截至 2024 年底：
+CI 配置使用 `windows-2022` 和 xmake `3.1.1`。托管 runner 中的 MSVC 会更新；`xmake check-toolchain` 输出实际编译器/标准库版本宏、阶段日志与 JSON 报告，作为构建证据保存。
 
-#### ✅ MSVC (推荐)
-- **状态**: ✅ 完全支持，生产就绪
-- **版本**: Visual Studio 2022 17.5+
-- **配置**: 开箱即用，无需额外配置
-- **体验**: 编译速度快，工具链成熟
+## 待验证组合
 
-#### ⚠️ Clang
-- **状态**: ⚠️ 实验性支持，配置复杂
-- **版本**: Clang 17+ (推荐 19+)
-- **问题**:
-  1. 需要 libc++ (不是默认的 libstdc++)
-  2. 需要手动预编译 std 模块 (~34MB 的 .pcm 文件)
-  3. xmake 对 Clang `import std` 的支持不完善
-  4. 模块依赖检测存在问题
-- **结论**: 虽然技术上可行，但实际使用困难重重
+| 平台 | 拟验证工具链 | 状态 |
+|---|---|---|
+| Linux x64 | Clang + libc++ | 尚未建立支持基线 |
+| Linux x64 | GCC + libstdc++ | 尚未建立支持基线 |
+| macOS arm64 | Apple Clang + SDK libc++ | 尚未建立支持基线 |
+| Windows arm64 | MSVC | 后续扩展 |
 
-#### ❌ GCC
-- **状态**: ❌ 不支持
-- **原因**: libstdc++ 对 C++23 模块的支持还在开发中
-- **预计**: 可能在 GCC 14/15 才会有较好的支持
+当前已配置 Linux/Clang 18 + libc++、Linux/GCC 14、macOS/Apple Clang 的独立探针 job；还未取得远端运行结果。探针和消费者用法见 [xmake 接入文档](XMAKE_INTEGRATION.md)。
 
-### 我们的实验结果
+“未验证”描述 cppx 的项目状态，不代表对应编译器普遍不支持 C++23 或 modules。具体版本和功能支持应通过最小探针与完整测试确定，不能沿用旧文档的年份预测。本次本地环境没有 WSL/Linux 或 macOS，未执行这些平台的构建。
 
-在 WSL2 + Clang 22 上的测试表明：
+## 模块与分发约束
 
-1. **可以手动编译** `import std` 代码：
-   ```bash
-   # 预编译 std 模块
-   clang++-22 --precompile /usr/lib/llvm-22/share/libc++/v1/std.cppm -o std.pcm
-   
-   # 编译程序
-   clang++-22 -fprebuilt-module-path=. source.cpp std.pcm -lc++abi
-   ```
+命名模块、`import std`、标准库功能和构建系统的依赖扫描是不同的兼容性维度。需要同时验证：
 
-2. **xmake 集成困难**：
-   - xmake 的模块依赖检测无法识别预编译的 std 模块
-   - 报错: `missing std dependency for module cppx.xxx`
-   - 即使设置了 `-fprebuilt-module-path`，依赖检测仍然失败
+1. `std::expected`、`std::format` 等所需 C++23 API。
+2. 标准库模块来源及对应编译选项。
+3. 多个 cppx 模块的依赖顺序、增量重编译。
+4. 独立消费者能否使用安装后的库与模块接口。
 
-3. **维护成本高**：
-   - 需要维护复杂的构建脚本
-   - 每次清理构建都要重新编译 std 模块（耗时）
-   - 用户需要手动安装和配置 libc++
+BMI/IFC 依赖编译器、标准库、编译选项和构建模式，不能当作跨工具链的通用分发格式。裸 `cl main.cpp cppx.lib` 不包含模块依赖配置，不能作为完整接入说明。
 
-## 设计决策
-
-**我们决定暂时只支持 MSVC**，原因：
-
-1. **项目目标**: 这是一个现代 C++23 库，展示最新特性
-2. **用户体验**: MSVC 提供了最佳的开箱即用体验
-3. **稳定性**: 避免因工具链问题影响项目本身的开发
-4. **聚焦**: 专注于库的功能，而不是构建系统的兼容性
-
-## 未来展望
-
-当以下条件满足时，我们会重新考虑支持 Clang/GCC：
-
-- ✅ xmake 完善了对 Clang `import std` 的支持
-- ✅ Clang/libc++ 提供了更简单的 std 模块集成方式
-- ✅ GCC/libstdc++ 完成了 C++23 模块支持
-
-## 替代方案
-
-如果你必须在 Linux 上开发，可以考虑：
-
-### 方案 1: WSL + Visual Studio (推荐)
-使用 WSL2 配合 Visual Studio 的 Linux 开发工具
-
-### 方案 2: 使用传统 `#include`
-可以创建一个分支，将 `import std;` 替换为传统的 `#include` 头文件，但会失去模块的优势（编译速度、隔离性等）
-
-### 方案 3: 等待工具链成熟
-C++23 模块是新特性，工具链支持还在完善中，预计 2025 年会有显著改善
-
-## 参考资料
-
-- [Clang C++23 模块文档](https://clang.llvm.org/docs/StandardCPlusPlusModules.html)
-- [libc++ 文档](https://libcxx.llvm.org/)
-- [xmake C++ 模块支持](https://xmake.io/#/guide/project_examples?id=c20-modules)
-- [MSVC C++23 支持](https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements)
-
----
-
-*最后更新: 2025-12*
+跨平台实现与可选模块接口的方向见 [ADR-0001](decisions/0001-cross-platform-baseline.md)，执行顺序见 [ROADMAP](ROADMAP.md)。
 

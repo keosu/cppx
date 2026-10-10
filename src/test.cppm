@@ -21,12 +21,6 @@ export struct assertion_result {
   std::string message;
 };
 
-// Section information
-export struct section_info {
-  std::string name;
-  std::function<void()> body;
-};
-
 // Test case information
 export struct test_case_info {
   std::string name;
@@ -48,44 +42,69 @@ export struct test_result {
 // Test context for managing sections
 export class test_context {
  private:
-  std::vector<section_info> sections_;
+  struct section_node {
+    std::string name;
+    std::string file;
+    int line = 0;
+    section_node* parent = nullptr;
+    std::vector<std::unique_ptr<section_node>> children;
+    bool complete = false;
+  };
+
+  section_node root_;
+  section_node* current_ = &root_;
   std::vector<assertion_result> assertions_;
-  bool current_section_entered_ = false;
-  size_t current_section_index_ = 0;
+  bool path_finished_ = false;
+
+  static bool children_complete(const section_node& node) {
+    return std::all_of(node.children.begin(), node.children.end(),
+                       [](const auto& child) { return child->complete; });
+  }
 
  public:
-  void add_section(const std::string& name, std::function<void()> body) {
-    sections_.push_back({name, std::move(body)});
+  void begin_run() {
+    current_ = &root_;
+    path_finished_ = false;
   }
 
-  bool should_enter_section() {
-    if (current_section_index_ < sections_.size()) {
-      current_section_entered_ = true;
-      return true;
+  bool enter_section(const std::string& name, const char* file, int line) {
+    auto it =
+        std::find_if(current_->children.begin(), current_->children.end(), [&](const auto& child) {
+          return child->name == name && child->file == file && child->line == line;
+        });
+    if (it == current_->children.end()) {
+      auto child = std::make_unique<section_node>();
+      child->name = name;
+      child->file = file;
+      child->line = line;
+      child->parent = current_;
+      current_->children.push_back(std::move(child));
+      it = std::prev(current_->children.end());
     }
-    return false;
+
+    // Discover siblings on every traversal, but execute only one leaf path per run.
+    if (path_finished_ || (*it)->complete) return false;
+    current_ = it->get();
+    return true;
   }
 
-  void run_next_section() {
-    if (current_section_index_ < sections_.size()) {
-      sections_[current_section_index_++].body();
-    }
+  void leave_section() noexcept {
+    current_->complete = children_complete(*current_);
+    current_ = current_->parent;
+    path_finished_ = true;
   }
+
+  bool finish_run() const { return children_complete(root_); }
 
   void add_assertion(assertion_result result) { assertions_.push_back(std::move(result)); }
 
   const std::vector<assertion_result>& get_assertions() const { return assertions_; }
 
   void reset() {
-    sections_.clear();
+    root_ = section_node{};
     assertions_.clear();
-    current_section_entered_ = false;
-    current_section_index_ = 0;
+    begin_run();
   }
-
-  bool has_sections() const { return !sections_.empty(); }
-
-  size_t section_count() const { return sections_.size(); }
 };
 
 // Global test context (thread_local for thread safety)
@@ -141,6 +160,10 @@ export class test_runner {
 
     const auto& tests = test_registry::instance().get_tests();
 
+    if (tests.empty()) {
+      return empty_run("No tests registered");
+    }
+
     logger_->info(
         "===============================================================================");
     logger_->info("Running {} test case(s)", tests.size());
@@ -182,6 +205,10 @@ export class test_runner {
       }
     }
 
+    if (filtered_tests.empty()) {
+      return empty_run("No tests matched filter: " + filter);
+    }
+
     logger_->info(
         "===============================================================================");
     logger_->info("Running {} test case(s) matching '{}'", filtered_tests.size(), filter);
@@ -211,6 +238,18 @@ export class test_runner {
   size_t skipped_count() const { return skipped_count_; }
 
  private:
+  std::vector<test_result> empty_run(const std::string& message) {
+    test_result result;
+    result.name = "Test discovery";
+    result.status = test_status::failed;
+    result.error_message = message;
+    results_.push_back(std::move(result));
+    failed_count_ = 1;
+    logger_->error("{}", message);
+    print_summary();
+    return results_;
+  }
+
   test_result run_test(const test_case_info& test) {
     test_result result;
     result.name = test.name;
@@ -232,35 +271,11 @@ export class test_runner {
       // Reset test context
       g_test_context.reset();
 
-      // Run the test body
-      test.body();
-
-      // If test has sections, run them
-      if (g_test_context.has_sections()) {
-        for (size_t i = 0; i < g_test_context.section_count(); ++i) {
-          g_test_context.reset();
-          test.body();
-        }
-      }
-
-      // Collect assertions
-      result.assertions = g_test_context.get_assertions();
-
-      // Check if any assertion failed
-      for (const auto& assertion : result.assertions) {
-        if (!assertion.passed) {
-          result.status = test_status::failed;
-          logger_->error("{}:{}: FAILED:", assertion.file, assertion.line);
-          logger_->error("  {}", assertion.expression);
-          if (!assertion.message.empty()) {
-            logger_->error("  {}", assertion.message);
-          }
-        }
-      }
-
-      if (result.status == test_status::passed) {
-        logger_->info("✓ Test passed");
-      }
+      // Recreate local setup for each section path. Keep assertions from every run.
+      do {
+        g_test_context.begin_run();
+        test.body();
+      } while (!g_test_context.finish_run());
 
     } catch (const std::exception& e) {
       result.status = test_status::failed;
@@ -270,6 +285,22 @@ export class test_runner {
       result.status = test_status::failed;
       result.error_message = "Unknown exception";
       logger_->error("✗ Test failed with unknown exception");
+    }
+
+    // Collect even when REQUIRE or the test body throws.
+    result.assertions = g_test_context.get_assertions();
+    for (const auto& assertion : result.assertions) {
+      if (!assertion.passed) {
+        result.status = test_status::failed;
+        logger_->error("{}:{}: FAILED:", assertion.file, assertion.line);
+        logger_->error("  {}", assertion.expression);
+        if (!assertion.message.empty()) {
+          logger_->error("  {}", assertion.message);
+        }
+      }
+    }
+    if (result.status == test_status::passed) {
+      logger_->info("✓ Test passed");
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -345,12 +376,17 @@ export class section_guard {
   bool entered_ = false;
 
  public:
-  section_guard(const std::string& name, std::function<void()> body) {
-    g_test_context.add_section(name, std::move(body));
-    entered_ = g_test_context.should_enter_section();
+  section_guard(const std::string& name, const char* file, int line)
+      : entered_(g_test_context.enter_section(name, file, line)) {}
+
+  ~section_guard() {
+    if (entered_) g_test_context.leave_section();
   }
 
-  operator bool() const { return entered_; }
+  section_guard(const section_guard&) = delete;
+  section_guard& operator=(const section_guard&) = delete;
+
+  explicit operator bool() const { return entered_; }
 };
 
 // Helper for test registration

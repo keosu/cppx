@@ -1,5 +1,7 @@
 # cppx.serialization - 实现状态
 
+> 2026-10-10 复核：下文为早期开发记录，不能作为当前生产就绪声明。当前测试与示例中的宏已经可以在本地 MSVC 基线上构建；JSON 仍有 Unicode 转义丢失、整数精度、严格语法和资源上限问题，证据及任务见 [项目评估](PROJECT_ASSESSMENT.md) 和 [路线](ROADMAP.md)。
+
 ## ✅ 已完成功能（Phase 1）
 
 ### 1. JSON 核心功能

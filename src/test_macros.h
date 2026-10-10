@@ -22,12 +22,9 @@
   static void CPPX_UNIQUE_NAME(test_func_)()
 
 // SECTION macro - defines a section within a test
-#define SECTION(name)                                                       \
-  if (::cppx::section_guard sg_##__LINE__(name,                             \
-                                          [&]() {                           \
-                                            /* Section body will be here */ \
-                                          });                               \
-      sg_##__LINE__)
+#define SECTION(name)                                                                   \
+  if (::cppx::section_guard CPPX_UNIQUE_NAME(section_guard_)(name, __FILE__, __LINE__); \
+      CPPX_UNIQUE_NAME(section_guard_))
 
 // Assertion macros
 #define REQUIRE(expr) ::cppx::record_assertion((expr), #expr, __FILE__, __LINE__)

@@ -5,12 +5,21 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Code formatting check on Linux (lightweight, no build required)
   code-format:
     name: Code Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     
     steps:
     - uses: actions/checkout@v4
@@ -23,17 +32,11 @@ jobs:
         clangFormatVersion: 18
         style: file  # 使用 .clang-format 配置
 
-  # Linux and macOS builds are currently disabled (MSVC-only project with /Zc:preprocessor)
-  # Uncomment when cross-platform support is added
-  
-  # build-linux:
-  #   name: Linux - ${{ matrix.compiler }} - ${{ matrix.mode }}
-  #   runs-on: ubuntu-latest
-  #   ... (omitted)
-
+  # Linux/macOS support and toolchain validation are tracked in docs/ROADMAP.md.
   build-windows:
     name: Windows - MSVC - ${{ matrix.mode }}
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -50,47 +53,84 @@ jobs:
     - name: Install xmake
       uses: xmake-io/github-action-setup-xmake@v1
       with:
-        xmake-version: latest
+        xmake-version: '3.1.1'
     
     - name: Configure
-      run: |
-        # Verify xmake is available
-        xmake --version
-        
-        # Clean and configure
-        xmake f -c
-        xmake f -m ${{ matrix.mode }} -y -v
-        
-        # Show configuration
-        xmake show
+      run: xmake f -c -p windows -a x64 -m ${{ matrix.mode }} -y -v
     
-    - name: Build
-      run: |
-        # Build with limited parallelism for C++20 modules
-        xmake -r -j 1 -v
+    - name: Build library, tests and examples
+      run: xmake build -j 2 -v
     
     - name: Run tests
       run: xmake test -v
-    
-    - name: Build examples
-      run: xmake build -g examples -j 1 -v
 
-  # macOS build is currently disabled (MSVC-only project)
-  # Uncomment when cross-platform support is added
-  
-  # build-macos:
-  #   name: macOS - Clang - ${{ matrix.mode }}
-  #   runs-on: macos-latest
-  #   ... (steps omitted)
+    - name: Check toolchain capabilities
+      if: matrix.mode == 'release'
+      run: xmake check-toolchain --toolchain=msvc --require=all
 
-  # Code quality checks are disabled for now
-  # Re-enable when formatting is standardized
-  
-  # code-quality:
-  #   name: Code Quality Checks
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   - name: Check formatting
-  #     run: clang-format --version
+    - name: Verify xmake consumers
+      run: xmake verify-consumer --mode=${{ matrix.mode }}
+
+    - name: Upload verification reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-verification-${{ matrix.mode }}
+        path: |
+          build/toolchain-check/**/*.json
+          build/toolchain-check/**/*.log
+          build/consumer-check/**/*.json
+          build/consumer-check/**/*.log
+        if-no-files-found: warn
+
+  toolchain-probes:
+    name: Probe - ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: linux-clang18-libcxx
+          os: ubuntu-24.04
+          packages: clang-18 libc++-18-dev libc++abi-18-dev
+          arguments: --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+          cc: clang-18
+          cxx: clang++-18
+        - name: linux-gcc14-libstdcxx
+          os: ubuntu-24.04
+          packages: g++-14
+          arguments: --toolchain=gcc
+          cc: gcc-14
+          cxx: g++-14
+        - name: macos-apple-clang
+          os: macos-14
+          arguments: --toolchain=xcode
+          cc: clang
+          cxx: clang++
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Linux toolchain
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ${{ matrix.packages }}
+    - uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: '3.1.1'
+    # C++23 is required; module results are recorded until a supported matrix is established.
+    - name: Probe toolchain
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+      run: xmake check-toolchain ${{ matrix.arguments }} --require=cpp23
+    - name: Upload capability reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: toolchain-${{ matrix.name }}
+        path: |
+          build/toolchain-check/**/*.json
+          build/toolchain-check/**/*.log
+        if-no-files-found: warn
 

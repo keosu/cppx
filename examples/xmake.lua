@@ -4,11 +4,13 @@
  
 -- Helper function to create example targets
 function add_example(name, source_file, default_build)
-    extra_modules = extra_modules or {}
-    default_build = default_build or true
+    if default_build == nil then
+        default_build = true
+    end
     
     target(name)
         set_kind("binary")
+        set_languages("c++23")
         set_default(default_build)
         set_group("examples")
         set_targetdir("$(builddir)/$(plat)/$(arch)/$(mode)/examples")

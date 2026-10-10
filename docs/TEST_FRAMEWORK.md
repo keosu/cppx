@@ -1,6 +1,26 @@
 # cppx.test - Modern C++20 Module-Based Testing Framework
 
-A Catch2-inspired testing framework built with C++20 modules and `import std`.
+A Catch2-inspired testing framework built with C++23 and `import std`.
+
+## Execution contract
+
+- Each leaf SECTION path runs the test body with fresh local variables. Assertions from all
+  paths are accumulated. Section identity includes its name and source location, so siblings
+  may have the same name on different lines.
+- SECTION declarations must form a fixed, repeatable tree. Do not change its structure using
+  state that survives a test-body rerun. Put separate declarations on separate source lines.
+- CHECK records a failure and continues; REQUIRE or an uncaught exception stops the entire
+  current test case, including remaining sections. Subsequent test cases still run.
+- Assertions recorded before an exception, including the failing REQUIRE, remain in the result.
+- An empty registry or a filter matching no cases produces one failed `Test discovery` result;
+  `failed_count()` is then nonzero.
+- Assertions are collected on the runner's thread. Worker-thread assertions are not aggregated;
+  return worker results and assert on the runner thread. Nested runner calls are unsupported.
+- `test_runner_contract` validates these behaviors using ordinary checks and a process exit code,
+  independently of the framework's assertion reporting.
+
+Low-level section tracking helpers changed during this hardening. Use the TEST_CASE/SECTION
+macros rather than constructing `section_guard` or manipulating `test_context` directly.
 
 ## Features
 

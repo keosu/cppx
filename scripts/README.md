@@ -2,6 +2,14 @@
 
 本目录包含 xmake 任务的实现脚本。
 
+构建生态验证任务：
+
+- `xmake check-toolchain`：独立验证 C++23、命名模块、import std，保存 JSON 与日志。
+- `xmake verify-consumer`：验证源码及本地模块包的独立消费者。
+- `check_support.lua`：为以上任务提供独立工作目录、子进程超时和报告工具。
+
+完整参数和接入方式见 [xmake 接入与验证](../docs/XMAKE_INTEGRATION.md)。
+
 ## 文件说明
 
 ### `format.lua`
