@@ -17,6 +17,7 @@ function add_example(name, source_file, default_build)
          
         add_files(source_file)
         add_deps("cppx")
+        add_rules("cppx.instrument")
         
         -- Module support
         set_policy("build.c++.modules", true)

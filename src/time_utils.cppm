@@ -1,10 +1,16 @@
 // cppx.time_utils - Time formatting, parsing, and utilities
 // Provides ISO8601, RFC3339 formatting and scope timers
 
+module;
+#include <ctime>
+
 export module cppx.time_utils;
 
 import std;
 import cppx.error;
+#ifdef CPPX_FAULT_INJECTION
+import cppx.fault_injection;
+#endif
 
 namespace cppx {
 
@@ -22,99 +28,140 @@ using std::chrono::system_clock;
 // Time formatting
 // ============================================================================
 
-// Format time point as ISO8601 string (YYYY-MM-DDTHH:MM:SS.sss)
+namespace time_detail {
+inline bool local_tm(std::time_t time, std::tm& result) {
+#ifdef _WIN32
+  return ::localtime_s(&result, &time) == 0;
+#else
+  return ::localtime_r(&time, &result) != nullptr;
+#endif
+}
+inline bool representable(seconds value, nanoseconds fraction = {}) {
+  // Reserve one second at each endpoint so adding the fraction cannot overflow.
+  return value >= std::chrono::ceil<seconds>(system_clock::duration::min()) &&
+         value < std::chrono::floor<seconds>(system_clock::duration::max()) &&
+         fraction.count() >= 0;
+}
+}  // namespace time_detail
+
+// UTC output, truncated to milliseconds. Calendar arithmetic also handles pre-epoch dates.
 export std::string format_iso8601(const system_clock::time_point& time_point) {
-  auto time = system_clock::to_time_t(time_point);
-  auto ms = duration_cast<milliseconds>(time_point.time_since_epoch()) % 1000;
-
-  std::tm* tm_ptr = std::gmtime(&time);
-  if (!tm_ptr) {
-    return "";
-  }
-
-  char buffer[32];
-  std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", tm_ptr);
-
-  return std::format("{}.{:03d}Z", buffer, ms.count());
+  auto day = std::chrono::floor<std::chrono::days>(time_point);
+  std::chrono::year_month_day date(day);
+  std::chrono::hh_mm_ss time(std::chrono::floor<milliseconds>(time_point - day));
+  return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", int(date.year()),
+                     unsigned(date.month()), unsigned(date.day()), time.hours().count(),
+                     time.minutes().count(), time.seconds().count(), time.subseconds().count());
 }
 
-// Format time point as RFC3339 string
 export std::string format_rfc3339(const system_clock::time_point& time_point) {
   return format_iso8601(time_point);
 }
 
-// Format time point with custom format string
+// Custom formats use local time and must not contain embedded NUL characters.
 export std::string format_time(const system_clock::time_point& time_point,
                                std::string_view format = "%Y-%m-%d %H:%M:%S") {
+  if (format.empty()) return "";
+  if (format.find('\0') != std::string_view::npos)
+    throw std::invalid_argument("NUL in time format");
+  std::tm tm{};
   auto time = system_clock::to_time_t(time_point);
-
-  std::tm* tm_ptr = std::localtime(&time);
-  if (!tm_ptr) {
-    return "";
+  if (!time_detail::local_tm(time, tm)) throw std::out_of_range("Local time out of range");
+  std::string owned_format(format);
+  for (size_t size = 128; size <= 65536; size *= 2) {
+    std::string out(size, '\0');
+    auto count = std::strftime(out.data(), out.size(), owned_format.c_str(), &tm);
+    if (count) {
+      out.resize(count);
+      return out;
+    }
   }
-
-  char buffer[128];
-  std::strftime(buffer, sizeof(buffer), format.data(), tm_ptr);
-
-  return std::string(buffer);
+  throw std::runtime_error("Time format failed or output exceeds 64 KiB");
 }
 
-// Get current time formatted
 export std::string now_iso8601() { return format_iso8601(system_clock::now()); }
-
 export std::string now_rfc3339() { return format_rfc3339(system_clock::now()); }
-
 export std::string now_formatted(std::string_view format = "%Y-%m-%d %H:%M:%S") {
   return format_time(system_clock::now(), format);
 }
 
-// ============================================================================
-// Time parsing
-// ============================================================================
-
-// Parse ISO8601 time string
+// RFC3339 subset: YYYY-MM-DDTHH:MM:SS[.1..9 digits](Z|+HH:MM|-HH:MM).
+// Leap seconds are rejected; fractional seconds truncate to the system clock resolution.
 export expected<system_clock::time_point, error_info> parse_iso8601(std::string_view str) {
-  std::tm tm = {};
-  std::string temp_str{str};
-  std::istringstream ss{temp_str};
-
-  // Try to parse YYYY-MM-DDTHH:MM:SS format
-  ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
-
-  if (ss.fail()) {
-    return expected<system_clock::time_point, error_info>::err(
-        error_info("Failed to parse ISO8601 time string"));
+  using R = expected<system_clock::time_point, error_info>;
+  auto invalid = [] { return R::err(error_info("Invalid ISO8601 timestamp")); };
+  auto number = [&](size_t pos, size_t count) -> int {
+    if (pos + count > str.size()) return -1;
+    int out = 0;
+    for (size_t i = pos; i < pos + count; ++i) {
+      if (str[i] < '0' || str[i] > '9') return -1;
+      out = out * 10 + str[i] - '0';
+    }
+    return out;
+  };
+  if (str.size() < 20 || str[4] != '-' || str[7] != '-' || str[10] != 'T' || str[13] != ':' ||
+      str[16] != ':')
+    return invalid();
+  int y = number(0, 4), m = number(5, 2), d = number(8, 2);
+  int h = number(11, 2), min = number(14, 2), sec = number(17, 2);
+  std::chrono::year_month_day date{std::chrono::year(y), std::chrono::month(unsigned(m)),
+                                   std::chrono::day(unsigned(d))};
+  if (y < 1 || !date.ok() || h < 0 || h > 23 || min < 0 || min > 59 || sec < 0 || sec > 59)
+    return invalid();
+  size_t pos = 19;
+  int fraction = 0;
+  if (str[pos] == '.') {
+    ++pos;
+    size_t digits = 0;
+    while (pos < str.size() && str[pos] >= '0' && str[pos] <= '9') {
+      if (++digits > 9) return invalid();
+      fraction = fraction * 10 + str[pos++] - '0';
+    }
+    if (!digits) return invalid();
+    while (digits++ < 9) fraction *= 10;
   }
-
-  // Convert to time_point
-  auto time = std::mktime(&tm);
-  if (time == -1) {
-    return expected<system_clock::time_point, error_info>::err(error_info("Invalid time value"));
-  }
-
-  return expected<system_clock::time_point, error_info>::ok(system_clock::from_time_t(time));
+  int offset = 0;
+  if (pos < str.size() && str[pos] == 'Z')
+    ++pos;
+  else if (pos < str.size() && (str[pos] == '+' || str[pos] == '-')) {
+    int sign = str[pos] == '+' ? 1 : -1;
+    if (str.size() - pos != 6 || str[pos + 3] != ':') return invalid();
+    int oh = number(pos + 1, 2), om = number(pos + 4, 2);
+    if (oh < 0 || oh > 23 || om < 0 || om > 59) return invalid();
+    offset = sign * (oh * 60 + om);
+    pos += 6;
+  } else
+    return invalid();
+  if (pos != str.size()) return invalid();
+  auto whole = duration_cast<seconds>(std::chrono::sys_days(date).time_since_epoch()) + hours(h) +
+               minutes(min - offset) + seconds(sec);
+  if (!time_detail::representable(whole, nanoseconds(fraction))) return invalid();
+  return R::ok(
+      system_clock::time_point(duration_cast<system_clock::duration>(whole) +
+                               duration_cast<system_clock::duration>(nanoseconds(fraction))));
 }
 
-// Parse custom time format
+// Local civil time: libc selects one offset in an ambiguous DST fold; gaps are rejected.
 export expected<system_clock::time_point, error_info>
 parse_time(std::string_view str, std::string_view format = "%Y-%m-%d %H:%M:%S") {
-  std::tm tm = {};
-  std::string temp_str{str};
-  std::istringstream ss{temp_str};
-
-  ss >> std::get_time(&tm, format.data());
-
-  if (ss.fail()) {
-    return expected<system_clock::time_point, error_info>::err(
-        error_info("Failed to parse time string"));
-  }
-
-  auto time = std::mktime(&tm);
-  if (time == -1) {
-    return expected<system_clock::time_point, error_info>::err(error_info("Invalid time value"));
-  }
-
-  return expected<system_clock::time_point, error_info>::ok(system_clock::from_time_t(time));
+  using R = expected<system_clock::time_point, error_info>;
+  auto invalid = [] { return R::err(error_info("Invalid local timestamp or format")); };
+  if (format.empty() || format.find('\0') != std::string_view::npos) return invalid();
+  std::tm tm{};
+  tm.tm_isdst = -1;
+  std::istringstream stream{std::string(str)};
+  std::string owned_format(format);
+  stream >> std::get_time(&tm, owned_format.c_str());
+  if (stream.fail() || stream.peek() != std::char_traits<char>::eof()) return invalid();
+  auto original = tm;
+  auto value = std::mktime(&tm);
+  std::tm verified{};
+  if (!time_detail::local_tm(value, verified) || verified.tm_year != original.tm_year ||
+      verified.tm_mon != original.tm_mon || verified.tm_mday != original.tm_mday ||
+      verified.tm_hour != original.tm_hour || verified.tm_min != original.tm_min ||
+      verified.tm_sec != original.tm_sec || !time_detail::representable(seconds(value)))
+    return invalid();
+  return R::ok(system_clock::from_time_t(value));
 }
 
 // ============================================================================
@@ -170,7 +217,10 @@ export class scope_timer {
     auto duration = duration_cast<milliseconds>(end - start_);
 
     if (callback_) {
-      callback_(duration);
+      try {
+        callback_(duration);
+      } catch (...) { /* scope_timer callbacks are best effort */
+      }
     }
   }
 
@@ -204,60 +254,116 @@ export auto time_scope(std::string name, auto callback) {
 
 export class timer {
  public:
-  timer() : running_(false) {}
+  timer() = default;
+  ~timer() {
+    stop();
+    // The worker owns shared state, so destruction in its callback is safe as well.
+    if (thread_.joinable()) thread_.detach();
+  }
+  timer(const timer&) = delete;
+  timer& operator=(const timer&) = delete;
 
-  ~timer() { stop(); }
-
-  // Start periodic timer
   void start_periodic(milliseconds interval, std::function<void()> callback) {
-    stop();
-
-    running_ = true;
-    thread_ = std::thread([this, interval, callback = std::move(callback)]() {
-      while (running_) {
-        auto start = steady_clock::now();
-
-        callback();
-
-        auto end = steady_clock::now();
-        auto elapsed = duration_cast<milliseconds>(end - start);
-        auto sleep_time = interval - elapsed;
-
-        if (sleep_time.count() > 0 && running_) {
-          std::this_thread::sleep_for(sleep_time);
-        }
-      }
-    });
+    if (interval.count() <= 0) throw std::invalid_argument("Timer interval must be positive");
+    start(interval, std::move(callback), true);
   }
-
-  // Start one-shot timer
   void start_once(milliseconds delay, std::function<void()> callback) {
-    stop();
-
-    running_ = true;
-    thread_ = std::thread([this, delay, callback = std::move(callback)]() {
-      std::this_thread::sleep_for(delay);
-      if (running_) {
-        callback();
-      }
-    });
+    if (delay.count() < 0) throw std::invalid_argument("Timer delay must not be negative");
+    start(delay, std::move(callback), false);
   }
-
-  // Stop timer
+  // External stop waits for an active callback; callback stop only requests cancellation.
   void stop() {
-    if (running_) {
-      running_ = false;
-      if (thread_.joinable()) {
-        thread_.join();
-      }
+    if (active_timer_ == this) {
+      request_stop();
+      return;
     }
+    std::lock_guard lock(lifecycle_mutex_);
+    stop_and_join();
   }
-
-  [[nodiscard]] bool is_running() const { return running_; }
+  [[nodiscard]] bool is_running() const {
+    std::lock_guard lock(state_->mutex);
+    return state_->running;
+  }
+  [[nodiscard]] std::exception_ptr exception() const {
+    std::lock_guard lock(state_->mutex);
+    return state_->exception;
+  }
+  void rethrow_if_failed() const {
+    if (auto error = exception()) std::rethrow_exception(error);
+  }
 
  private:
-  bool running_;
+  struct state {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool running = false;
+    std::exception_ptr exception;
+  };
+  inline static thread_local const timer* active_timer_ = nullptr;
+  std::shared_ptr<state> state_ = std::make_shared<state>();
+  std::mutex lifecycle_mutex_;
   std::thread thread_;
+  void request_stop() {
+    {
+      std::lock_guard lock(state_->mutex);
+      state_->running = false;
+    }
+    state_->cv.notify_all();
+  }
+  void stop_and_join() {
+    request_stop();
+    if (thread_.joinable()) thread_.join();
+  }
+  void start(milliseconds interval, std::function<void()> callback, bool periodic) {
+    if (active_timer_ == this) throw std::logic_error("Cannot restart a timer from its callback");
+    if (!callback) throw std::invalid_argument("Timer callback is empty");
+    if (interval > duration_cast<milliseconds>(steady_clock::duration::max()) / 2)
+      throw std::out_of_range("Timer interval is not representable");
+    std::unique_lock lifecycle(lifecycle_mutex_);
+    stop_and_join();
+    auto shared = state_;
+    std::unique_lock state_lock(shared->mutex);
+    shared->running = true;
+    shared->exception = nullptr;
+    try {
+#ifdef CPPX_FAULT_INJECTION
+      testing::thread_creation();
+#endif
+      thread_ = std::thread(
+          [state = shared, owner = this, interval, callback = std::move(callback), periodic] {
+            active_timer_ = owner;
+            std::unique_lock lock(state->mutex);
+            if (!periodic) state->cv.wait_for(lock, interval, [&] { return !state->running; });
+            while (state->running) {
+              auto start = steady_clock::now();
+              lock.unlock();
+              try {
+                callback();
+              } catch (...) {
+                lock.lock();
+                state->exception = std::current_exception();
+                state->running = false;
+                break;
+              }
+              lock.lock();
+              if (!periodic) {
+                state->running = false;
+                break;
+              }
+              state->cv.wait_until(lock, start + interval, [&] { return !state->running; });
+            }
+            state->cv.notify_all();
+            // Keep thread identity through destruction of the callback's captures.
+            // A last shared owner of this timer may be released there.
+          });
+    } catch (...) {
+      shared->running = false;
+      throw;
+    }
+    // Publish the thread handle and release the object's lock before the callback can run.
+    // The remaining local lock owns shared state, allowing callback-side destruction.
+    lifecycle.unlock();
+  }
 };
 
 // ============================================================================
@@ -367,17 +473,28 @@ export long long timestamp_us() {
   return duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
 }
 
-// Convert timestamp to time_point
+namespace time_detail {
+template <typename Duration>
+system_clock::time_point from_timestamp(long long value) {
+  using clock_duration = system_clock::duration;
+  using ratio = std::ratio_divide<typename Duration::period, typename clock_duration::period>;
+  if constexpr (ratio::den == 1) {
+    if (value > std::numeric_limits<typename clock_duration::rep>::max() / ratio::num ||
+        value < std::numeric_limits<typename clock_duration::rep>::min() / ratio::num)
+      throw std::out_of_range("Timestamp exceeds system clock range");
+  }
+  return system_clock::time_point(duration_cast<clock_duration>(Duration(value)));
+}
+}  // namespace time_detail
+
 export system_clock::time_point from_timestamp_sec(long long timestamp) {
-  return system_clock::time_point(seconds(timestamp));
+  return time_detail::from_timestamp<seconds>(timestamp);
 }
-
 export system_clock::time_point from_timestamp_ms(long long timestamp) {
-  return system_clock::time_point(milliseconds(timestamp));
+  return time_detail::from_timestamp<milliseconds>(timestamp);
 }
-
 export system_clock::time_point from_timestamp_us(long long timestamp) {
-  return system_clock::time_point(microseconds(timestamp));
+  return time_detail::from_timestamp<microseconds>(timestamp);
 }
 
 }  // namespace cppx

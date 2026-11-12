@@ -14,6 +14,8 @@ function main()
         toolchain = option.get("toolchain") or "auto", sdk = option.get("sdk"),
         runtimes = option.get("runtimes"), required = required, capabilities = {}
     }
+    report.cc = option.get("cc")
+    report.cxx = option.get("cxx")
     report.xmake = checks.run_step(directory, "xmake-version", {"--version"})
     local passed = true
     for _, feature in ipairs({"cpp23", "named_module", "import_std"}) do
@@ -21,11 +23,6 @@ function main()
         checks.copy_project(path.join(os.projectdir(), "tests", "toolchain"), projectdir)
         local arguments = checks.configuration(projectdir, mode)
         table.insert(arguments, "--feature=" .. feature)
-        for _, name in ipairs({"toolchain", "sdk", "runtimes"}) do
-            if option.get(name) then
-                table.insert(arguments, "--" .. name .. "=" .. option.get(name))
-            end
-        end
         local result = checks.verify_project(projectdir, arguments)
         report.capabilities[feature] = result
         print("%s: %s", feature, result.passed and "passed" or "failed (see logs)")

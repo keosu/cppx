@@ -58,3 +58,13 @@ function main()
 end
 ```
 
+
+## Python 工程工具
+
+- `verify.py`：隔离构建、sanitizer 对照、13 个测试程序、故障注入/安装禁用检查、固定语料变异、JSON 差分、压力、JSON/JUnit 与资源采样。
+- `verify_components.py`：最小组件依赖闭包与配置拒绝。
+- `benchmark.py`：生产 Release 构建的多次性能测量与波动区间。
+- `package.py`：确定性源码包、文件清单、私有 xrepo 配方及独立包消费者。
+- `verify_upgrade.py`：旧基线 → 工作区 → 旧基线的独立重建及持久化数据演练。
+
+要求 Python 3.10+；输出目录必须不存在。完整命令和证据限制见 [质量验证](../docs/QUALITY.md) 与 [发布政策](../docs/RELEASE_POLICY.md)。

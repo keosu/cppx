@@ -8,6 +8,11 @@ option("cppx_source")
     set_description("Path to a cppx source checkout")
 option_end()
 
+option("cppx_version")
+    set_showmenu(true)
+    set_description("Exact source package version (omit for local binary packages)")
+option_end()
+
 option("cppx_packages")
     set_showmenu(true)
     set_description("Path to the repository produced by xmake package")
@@ -17,7 +22,11 @@ if get_config("cppx_source") then
     includes(path.join(get_config("cppx_source"), "xmake.lua"))
 elseif get_config("cppx_packages") then
     add_repositories("cppx-local .", {rootdir = get_config("cppx_packages")})
-    add_requires("cppx", {system = false, configs = {debug = is_mode("debug")}})
+    local configs = {debug = is_mode("debug")}
+    if get_config("toolchain") then configs.toolchains = get_config("toolchain") end
+    if get_config("runtimes") then configs.runtimes = get_config("runtimes") end
+    local version = get_config("cppx_version")
+    add_requires("cppx" .. (version and (" " .. version) or ""), {system = false, configs = configs})
 end
 
 target("consumer")

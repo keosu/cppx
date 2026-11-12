@@ -29,35 +29,35 @@ class expected {
 
   // Copy and move constructors
   expected(const expected& other) = default;
-  expected(expected&& other) noexcept = default;
+  expected(expected&& other) = default;
   expected& operator=(const expected& other) = default;
-  expected& operator=(expected&& other) noexcept = default;
+  expected& operator=(expected&& other) = default;
 
   // Check if result is ok or error
-  [[nodiscard]] bool is_ok() const noexcept { return std::holds_alternative<T>(storage_); }
+  [[nodiscard]] bool is_ok() const noexcept { return storage_.has_value(); }
 
-  [[nodiscard]] bool is_err() const noexcept { return std::holds_alternative<E>(storage_); }
+  [[nodiscard]] bool is_err() const noexcept { return !storage_.has_value(); }
 
   // Get value (throws if error)
   [[nodiscard]] const T& value() const& {
     if (is_err()) {
       throw std::runtime_error("Called value() on error result");
     }
-    return std::get<T>(storage_);
+    return *storage_;
   }
 
   [[nodiscard]] T& value() & {
     if (is_err()) {
       throw std::runtime_error("Called value() on error result");
     }
-    return std::get<T>(storage_);
+    return *storage_;
   }
 
   [[nodiscard]] T&& value() && {
     if (is_err()) {
       throw std::runtime_error("Called value() on error result");
     }
-    return std::move(std::get<T>(storage_));
+    return std::move(*storage_);
   }
 
   // Get error (throws if ok)
@@ -65,21 +65,21 @@ class expected {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return std::get<E>(storage_);
+    return storage_.error();
   }
 
   [[nodiscard]] E& error() & {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return std::get<E>(storage_);
+    return storage_.error();
   }
 
   [[nodiscard]] E&& error() && {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return std::move(std::get<E>(storage_));
+    return std::move(storage_.error());
   }
 
   // Get value or default
@@ -95,7 +95,13 @@ class expected {
   template <typename F>
   auto map(F&& f) const& -> expected<std::invoke_result_t<F, const T&>, E> {
     if (is_ok()) {
-      return expected<std::invoke_result_t<F, const T&>, E>::ok(f(value()));
+      using U = std::invoke_result_t<F, const T&>;
+      if constexpr (std::is_void_v<U>) {
+        std::invoke(std::forward<F>(f), value());
+        return expected<void, E>::ok();
+      } else {
+        return expected<U, E>::ok(std::invoke(std::forward<F>(f), value()));
+      }
     } else {
       return expected<std::invoke_result_t<F, const T&>, E>::err(error());
     }
@@ -104,7 +110,13 @@ class expected {
   template <typename F>
   auto map(F&& f) && -> expected<std::invoke_result_t<F, T&&>, E> {
     if (is_ok()) {
-      return expected<std::invoke_result_t<F, T&&>, E>::ok(f(std::move(value())));
+      using U = std::invoke_result_t<F, T&&>;
+      if constexpr (std::is_void_v<U>) {
+        std::invoke(std::forward<F>(f), std::move(value()));
+        return expected<void, E>::ok();
+      } else {
+        return expected<U, E>::ok(std::invoke(std::forward<F>(f), std::move(value())));
+      }
     } else {
       return expected<std::invoke_result_t<F, T&&>, E>::err(std::move(error()));
     }
@@ -113,7 +125,8 @@ class expected {
   template <typename F>
   auto map_err(F&& f) const& -> expected<T, std::invoke_result_t<F, const E&>> {
     if (is_err()) {
-      return expected<T, std::invoke_result_t<F, const E&>>::err(f(error()));
+      return expected<T, std::invoke_result_t<F, const E&>>::err(
+          std::invoke(std::forward<F>(f), error()));
     } else {
       return expected<T, std::invoke_result_t<F, const E&>>::ok(value());
     }
@@ -122,7 +135,8 @@ class expected {
   template <typename F>
   auto map_err(F&& f) && -> expected<T, std::invoke_result_t<F, E&&>> {
     if (is_err()) {
-      return expected<T, std::invoke_result_t<F, E&&>>::err(f(std::move(error())));
+      return expected<T, std::invoke_result_t<F, E&&>>::err(
+          std::invoke(std::forward<F>(f), std::move(error())));
     } else {
       return expected<T, std::invoke_result_t<F, E&&>>::ok(std::move(value()));
     }
@@ -132,7 +146,7 @@ class expected {
   template <typename F>
   auto and_then(F&& f) const& -> std::invoke_result_t<F, const T&> {
     if (is_ok()) {
-      return f(value());
+      return std::invoke(std::forward<F>(f), value());
     } else {
       using result_type = std::invoke_result_t<F, const T&>;
       return result_type::err(error());
@@ -142,7 +156,7 @@ class expected {
   template <typename F>
   auto and_then(F&& f) && -> std::invoke_result_t<F, T&&> {
     if (is_ok()) {
-      return f(std::move(value()));
+      return std::invoke(std::forward<F>(f), std::move(value()));
     } else {
       using result_type = std::invoke_result_t<F, T&&>;
       return result_type::err(std::move(error()));
@@ -156,12 +170,12 @@ class expected {
   struct ok_tag {};
   struct err_tag {};
 
-  expected(ok_tag, const T& value) : storage_(value) {}
-  expected(ok_tag, T&& value) : storage_(std::move(value)) {}
-  expected(err_tag, const E& error) : storage_(error) {}
-  expected(err_tag, E&& error) : storage_(std::move(error)) {}
+  expected(ok_tag, const T& value) : storage_(std::in_place, value) {}
+  expected(ok_tag, T&& value) : storage_(std::in_place, std::move(value)) {}
+  expected(err_tag, const E& error) : storage_(std::unexpect, error) {}
+  expected(err_tag, E&& error) : storage_(std::unexpect, std::move(error)) {}
 
-  std::variant<T, E> storage_;
+  std::expected<T, E> storage_;
 };
 
 // Specialization for void type
@@ -177,33 +191,85 @@ class expected<void, E> {
   static expected err(E&& error) { return expected(err_tag{}, std::move(error)); }
 
   expected(const expected& other) = default;
-  expected(expected&& other) noexcept = default;
+  expected(expected&& other) = default;
   expected& operator=(const expected& other) = default;
-  expected& operator=(expected&& other) noexcept = default;
+  expected& operator=(expected&& other) = default;
 
-  [[nodiscard]] bool is_ok() const noexcept { return !has_error_; }
+  [[nodiscard]] bool is_ok() const noexcept { return storage_.has_value(); }
 
-  [[nodiscard]] bool is_err() const noexcept { return has_error_; }
+  [[nodiscard]] bool is_err() const noexcept { return !storage_.has_value(); }
 
   [[nodiscard]] const E& error() const& {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return error_;
+    return storage_.error();
   }
 
   [[nodiscard]] E& error() & {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return error_;
+    return storage_.error();
   }
 
   [[nodiscard]] E&& error() && {
     if (is_ok()) {
       throw std::runtime_error("Called error() on ok result");
     }
-    return std::move(error_);
+    return std::move(storage_.error());
+  }
+
+  void value() const {
+    if (is_err()) throw std::runtime_error("Called value() on error result");
+  }
+
+  template <typename F>
+  auto map(F&& f) const& -> expected<std::invoke_result_t<F>, E> {
+    using U = std::invoke_result_t<F>;
+    if (is_err()) return expected<U, E>::err(error());
+    if constexpr (std::is_void_v<U>) {
+      std::invoke(std::forward<F>(f));
+      return expected<void, E>::ok();
+    } else {
+      return expected<U, E>::ok(std::invoke(std::forward<F>(f)));
+    }
+  }
+
+  template <typename F>
+  auto map(F&& f) && -> expected<std::invoke_result_t<F>, E> {
+    using U = std::invoke_result_t<F>;
+    if (is_err()) return expected<U, E>::err(std::move(error()));
+    if constexpr (std::is_void_v<U>) {
+      std::invoke(std::forward<F>(f));
+      return expected<void, E>::ok();
+    } else {
+      return expected<U, E>::ok(std::invoke(std::forward<F>(f)));
+    }
+  }
+
+  template <typename F>
+  auto map_err(F&& f) const& -> expected<void, std::invoke_result_t<F, const E&>> {
+    using R = expected<void, std::invoke_result_t<F, const E&>>;
+    return is_err() ? R::err(std::invoke(std::forward<F>(f), error())) : R::ok();
+  }
+
+  template <typename F>
+  auto map_err(F&& f) && -> expected<void, std::invoke_result_t<F, E&&>> {
+    using R = expected<void, std::invoke_result_t<F, E&&>>;
+    return is_err() ? R::err(std::invoke(std::forward<F>(f), std::move(error()))) : R::ok();
+  }
+
+  template <typename F>
+  auto and_then(F&& f) const& -> std::invoke_result_t<F> {
+    using R = std::invoke_result_t<F>;
+    return is_ok() ? std::invoke(std::forward<F>(f)) : R::err(error());
+  }
+
+  template <typename F>
+  auto and_then(F&& f) && -> std::invoke_result_t<F> {
+    using R = std::invoke_result_t<F>;
+    return is_ok() ? std::invoke(std::forward<F>(f)) : R::err(std::move(error()));
   }
 
   explicit operator bool() const noexcept { return is_ok(); }
@@ -212,12 +278,11 @@ class expected<void, E> {
   struct ok_tag {};
   struct err_tag {};
 
-  expected(ok_tag) : has_error_(false), error_() {}
-  expected(err_tag, const E& error) : has_error_(true), error_(error) {}
-  expected(err_tag, E&& error) : has_error_(true), error_(std::move(error)) {}
+  expected(ok_tag) : storage_(std::in_place) {}
+  expected(err_tag, const E& error) : storage_(std::unexpect, error) {}
+  expected(err_tag, E&& error) : storage_(std::unexpect, std::move(error)) {}
 
-  bool has_error_;
-  E error_;
+  std::expected<void, E> storage_;
 };
 
 // ============================================================================

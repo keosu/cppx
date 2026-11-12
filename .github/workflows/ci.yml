@@ -27,7 +27,7 @@ jobs:
     - name: Check code formatting
       uses: DoozyX/clang-format-lint-action@v0.18
       with:
-        source: 'src tests examples'
+        source: 'src tests examples quality'
         extensions: 'cpp,cppm,h'
         clangFormatVersion: 18
         style: file  # 使用 .clang-format 配置
@@ -71,6 +71,9 @@ jobs:
     - name: Verify xmake consumers
       run: xmake verify-consumer --mode=${{ matrix.mode }}
 
+    - name: Verify source release package
+      run: python scripts/package.py --output=build/source-package --verify --mode=${{ matrix.mode }}
+
     - name: Upload verification reports
       if: always()
       uses: actions/upload-artifact@v4
@@ -81,6 +84,11 @@ jobs:
           build/toolchain-check/**/*.log
           build/consumer-check/**/*.json
           build/consumer-check/**/*.log
+          build/source-package/**/*.json
+          build/source-package/*.log
+          build/source-package/*.tar.gz
+          build/source-package/SHA256SUMS
+          build/source-package/repository/**
         if-no-files-found: warn
 
   toolchain-probes:
@@ -100,7 +108,7 @@ jobs:
         - name: linux-gcc14-libstdcxx
           os: ubuntu-24.04
           packages: g++-14
-          arguments: --toolchain=gcc
+          arguments: --toolchain=gcc --cc=gcc-14 --cxx=g++-14
           cc: gcc-14
           cxx: g++-14
         - name: macos-apple-clang
@@ -133,4 +141,49 @@ jobs:
           build/toolchain-check/**/*.json
           build/toolchain-check/**/*.log
         if-no-files-found: warn
+
+  build-linux:
+    name: Linux - Clang 18 libc++ - ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, release]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-18 clang-tools-18 libc++-18-dev libc++abi-18-dev
+    - uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: '3.1.1'
+    - name: Require all toolchain capabilities
+      run: xmake check-toolchain --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared --require=all
+    - name: Configure and build library, tests and examples
+      run: |
+        xmake f -c -y -m ${{ matrix.mode }} --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+        xmake build -j 2 -v
+    - name: Run tests
+      run: xmake test -v
+    - name: Verify source and local package consumers
+      run: xmake verify-consumer --mode=${{ matrix.mode }} --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+    - name: Verify source release package
+      run: python3 scripts/package.py --output=build/source-package --verify --mode=${{ matrix.mode }} --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+    - name: Upload evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-verification-${{ matrix.mode }}
+        path: |
+          build/toolchain-check/**/*.json
+          build/toolchain-check/**/*.log
+          build/consumer-check/**/*.json
+          build/consumer-check/**/*.log
+          build/source-package/**/*.json
+          build/source-package/*.log
+          build/source-package/*.tar.gz
+          build/source-package/SHA256SUMS
+          build/source-package/repository/**
 

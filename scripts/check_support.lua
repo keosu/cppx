@@ -33,7 +33,12 @@ function run_step(directory, label, arguments, timeout)
 end
 
 function configuration(directory, mode)
-    return {"f", "-P", directory, "-c", "-y", "-m", mode, "-o", path.join(directory, "build")}
+    import("core.base.option")
+    local arguments = {"f", "-P", directory, "-c", "-y", "-m", mode, "-o", path.join(directory, "build")}
+    for _, name in ipairs({"toolchain", "sdk", "runtimes", "cc", "cxx"}) do
+        if option.get(name) then table.insert(arguments, "--" .. name .. "=" .. option.get(name)) end
+    end
+    return arguments
 end
 
 function verify_project(directory, arguments)

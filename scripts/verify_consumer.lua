@@ -6,6 +6,9 @@ function main()
     assert(mode == "debug" or mode == "release", "mode must be debug or release")
     local directory, reportfile = checks.workspace(option.get("output"), "consumer-check")
     local report = {schema_version = 1, host = os.host(), arch = os.arch(), mode = mode}
+    report.toolchain = option.get("toolchain") or "auto"
+    report.sdk = option.get("sdk")
+    report.runtimes = option.get("runtimes")
     local root = os.projectdir()
 
     -- Copy only distributable inputs. This build cannot use the checkout's build cache.

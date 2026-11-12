@@ -50,6 +50,20 @@ TEST_CASE("External consumer", "[integration]") {
 
   auto encoded = cppx::to_json_string(consumer_record{42});
   REQUIRE(cppx::from_json_string<consumer_record>(encoded).value == 42);
+  REQUIRE(cppx::json::parse("18446744073709551615").as_uint64() ==
+          std::numeric_limits<std::uint64_t>::max());
+  auto same_type = cppx::expected<int, int>::ok(7);
+  REQUIRE(same_type.value() == 7);
+  REQUIRE(parser.parse(std::vector<std::string>{"--help"}).value().help_requested());
+  REQUIRE(cppx::parse_iso8601("2026-01-01T00:00:00.123Z").is_ok());
+  cppx::temp_dir temporary("cppx_consumer");
+  auto path = temporary.path() / "atomic.txt";
+  REQUIRE(cppx::write_file(path, "plain file").is_ok());
+  REQUIRE(cppx::read_file_text(path).value() == "plain file");
+  REQUIRE(cppx::write_file_atomic(path, "consumer").is_ok());
+  REQUIRE(cppx::read_file_text(path).value() == "consumer");
+  pool.close();
+  REQUIRE(pool.is_closed());
 }
 
 int main() {

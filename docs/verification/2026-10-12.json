@@ -1,0 +1,132 @@
+{
+  "date": "2026-10-12",
+  "baseline_commit": "f6103fdc6633c564bf93fd964ee3a717918f9388",
+  "state": "working_tree",
+  "platform": "Windows x64 / MSVC 19.44 / xmake 3.1.1",
+  "reports": {
+    "release": {
+      "path": "build/final-release-2/report.json",
+      "passed": true,
+      "test_programs": 13,
+      "fuzz_iterations": 20000,
+      "differential": {
+        "cases": 2004,
+        "oracle": "Python json",
+        "passed": true
+      },
+      "stress_seconds": 300,
+      "resources": {
+        "resident_bytes": {
+          "min": 6758400,
+          "max": 8331264,
+          "last": 8331264
+        },
+        "open_handles": {
+          "min": 65,
+          "max": 65,
+          "last": 65
+        },
+        "threads": {
+          "min": 1,
+          "max": 4,
+          "last": 1
+        }
+      },
+      "current_src_matches": true
+    },
+    "debug": {
+      "path": "build/final-debug-2/report.json",
+      "passed": true,
+      "test_programs": 13,
+      "fuzz_iterations": 10000,
+      "differential": {
+        "cases": 2004,
+        "oracle": "Python json",
+        "passed": true
+      },
+      "stress_seconds": 60,
+      "resources": {
+        "resident_bytes": {
+          "min": 7680000,
+          "max": 8843264,
+          "last": 8679424
+        },
+        "open_handles": {
+          "min": 65,
+          "max": 65,
+          "last": 65
+        },
+        "threads": {
+          "min": 1,
+          "max": 4,
+          "last": 1
+        }
+      },
+      "current_src_matches": true
+    },
+    "asan": {
+      "path": "build/asan-verified/report.json",
+      "passed": true,
+      "test_programs": 13,
+      "fuzz_iterations": 10000,
+      "differential": {
+        "cases": 2004,
+        "oracle": "Python json",
+        "passed": true
+      },
+      "stress_seconds": 60,
+      "resources": {
+        "resident_bytes": {
+          "min": 19415040,
+          "max": 350871552,
+          "last": 350871552
+        },
+        "open_handles": {
+          "min": 91,
+          "max": 91,
+          "last": 91
+        },
+        "threads": {
+          "min": 2,
+          "max": 4,
+          "last": 2
+        }
+      },
+      "current_src_matches": true
+    },
+    "components": {
+      "path": "build/components-check-2/report.json",
+      "passed": true
+    },
+    "consumer_release": {
+      "path": "build/final-consumer-release/report.json",
+      "passed": true
+    },
+    "consumer_debug": {
+      "path": "build/final-consumer-debug/report.json",
+      "passed": true
+    },
+    "toolchain": {
+      "path": "build/final-toolchain/report.json",
+      "passed": true
+    },
+    "upgrade": {
+      "path": "build/upgrade-check-3/report.json",
+      "passed": true
+    },
+    "performance": {
+      "path": "build/final-performance/report.json",
+      "passed": true
+    }
+  },
+  "normal_release_tests": 12,
+  "formatted_cpp_files": 49,
+  "external_gates": [
+    "Current-source Linux full CI and GCC 14/macOS toolchain validation",
+    "Linux UBSan/TSan, measured coverage and coverage-guided fuzz",
+    "Real OS exhaustion/disk-full/device faults in an isolated environment",
+    "Continuous dedicated 24-hour soak and calibrated performance baseline",
+    "Real downstream product migration/rollback acceptance",
+    "Public release and xmake-repo review"
+  ]
+}

@@ -23,7 +23,7 @@ function main()
     
     -- Find all source files
     local sourcefiles = {}
-    for _, dir in ipairs({"src", "tests", "examples"}) do
+    for _, dir in ipairs({"src", "tests", "examples", "quality"}) do
         local files = os.files(path.join(dir, "**.cpp"))
         table.join2(sourcefiles, files)
         files = os.files(path.join(dir, "**.cppm"))

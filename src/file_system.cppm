@@ -1,10 +1,20 @@
 // cppx.file_system - File system utilities
 // Provides file I/O, temporary file management, and path operations
 
+module;
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #define NOMINMAX
+  #include <Windows.h>
+#endif
+
 export module cppx.file_system;
 
 import std;
 import cppx.error;
+#ifdef CPPX_FAULT_INJECTION
+import cppx.fault_injection;
+#endif
 
 namespace cppx {
 
@@ -24,12 +34,14 @@ export expected<std::string, error_info> read_file_text(const fs::path& path) {
           error_info("Failed to open file: " + path.string()));
     }
 
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_read)) file.setstate(std::ios::badbit);
+#endif
     std::string content;
-    file.seekg(0, std::ios::end);
-    content.reserve(file.tellg());
-    file.seekg(0, std::ios::beg);
-
-    content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    char buffer[8192];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+      content.append(buffer, static_cast<size_t>(file.gcount()));
+    if (file.bad() || !file.eof()) throw std::runtime_error("Failed to read complete file");
 
     return expected<std::string, error_info>::ok(std::move(content));
   } catch (const std::exception& e) {
@@ -52,8 +64,16 @@ export expected<std::vector<std::byte>, error_info> read_file_binary(const fs::p
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
 
-    std::vector<std::byte> buffer(size);
-    file.read(reinterpret_cast<char*>(buffer.data()), size);
+    if (size < 0 || !file || !std::in_range<size_t>(size))
+      throw std::runtime_error("Failed to determine file size");
+    std::vector<std::byte> buffer(static_cast<size_t>(size));
+#ifdef CPPX_FAULT_INJECTION
+    // Force a real short read after the size has been obtained.
+    if (testing::hit(testing::fault::file_read)) file.seekg(0, std::ios::end);
+#endif
+    if (size) file.read(reinterpret_cast<char*>(buffer.data()), size);
+    if (!file || (size && file.gcount() != size))
+      throw std::runtime_error("Short or failed binary read");
 
     return expected<std::vector<std::byte>, error_info>::ok(std::move(buffer));
   } catch (const std::exception& e) {
@@ -72,6 +92,9 @@ export expected<std::vector<std::string>, error_info> read_lines(const fs::path&
           error_info("Failed to open file: " + path.string()));
     }
 
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_read)) file.setstate(std::ios::badbit);
+#endif
     std::vector<std::string> lines;
     std::string line;
 
@@ -79,6 +102,7 @@ export expected<std::vector<std::string>, error_info> read_lines(const fs::path&
       lines.push_back(std::move(line));
     }
 
+    if (file.bad() || !file.eof()) throw std::runtime_error("Failed to read complete file");
     return expected<std::vector<std::string>, error_info>::ok(std::move(lines));
   } catch (const std::exception& e) {
     return expected<std::vector<std::string>, error_info>::err(
@@ -102,13 +126,27 @@ export expected<void, error_info> write_file(const fs::path& path, std::string_v
           error_info("Failed to open file for writing: " + path.string()));
     }
 
-    file.write(content.data(), content.size());
+    if (!std::in_range<std::streamsize>(content.size()))
+      throw std::length_error("File content too large");
+    if (!content.empty()) file.write(content.data(), static_cast<std::streamsize>(content.size()));
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_write)) file.setstate(std::ios::badbit);
+#endif
+    file.flush();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_flush)) file.setstate(std::ios::badbit);
+#endif
 
     if (!file) {
       return expected<void, error_info>::err(
           error_info("Failed to write to file: " + path.string()));
     }
 
+    file.close();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_close)) file.setstate(std::ios::badbit);
+#endif
+    if (!file) throw std::runtime_error("Failed to close file after writing");
     return expected<void, error_info>::ok();
   } catch (const std::exception& e) {
     return expected<void, error_info>::err(
@@ -129,13 +167,29 @@ write_file_binary(const fs::path& path, const std::vector<std::byte>& data, bool
           error_info("Failed to open file for writing: " + path.string()));
     }
 
-    file.write(reinterpret_cast<const char*>(data.data()), data.size());
+    if (!std::in_range<std::streamsize>(data.size()))
+      throw std::length_error("File content too large");
+    if (!data.empty())
+      file.write(reinterpret_cast<const char*>(data.data()),
+                 static_cast<std::streamsize>(data.size()));
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_write)) file.setstate(std::ios::badbit);
+#endif
+    file.flush();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_flush)) file.setstate(std::ios::badbit);
+#endif
 
     if (!file) {
       return expected<void, error_info>::err(
           error_info("Failed to write to file: " + path.string()));
     }
 
+    file.close();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_close)) file.setstate(std::ios::badbit);
+#endif
+    if (!file) throw std::runtime_error("Failed to close file after writing");
     return expected<void, error_info>::ok();
   } catch (const std::exception& e) {
     return expected<void, error_info>::err(
@@ -158,12 +212,24 @@ write_lines(const fs::path& path, const std::vector<std::string>& lines, bool ap
     for (const auto& line : lines) {
       file << line << '\n';
     }
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_write)) file.setstate(std::ios::badbit);
+#endif
+    file.flush();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_flush)) file.setstate(std::ios::badbit);
+#endif
 
     if (!file) {
       return expected<void, error_info>::err(
           error_info("Failed to write to file: " + path.string()));
     }
 
+    file.close();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_close)) file.setstate(std::ios::badbit);
+#endif
+    if (!file) throw std::runtime_error("Failed to close file after writing");
     return expected<void, error_info>::ok();
   } catch (const std::exception& e) {
     return expected<void, error_info>::err(
@@ -189,15 +255,10 @@ fs::path path_join(const fs::path& base, const fs::path& component, Args&&... ar
 // Ensure directory exists (create if needed)
 export expected<void, error_info> ensure_dir(const fs::path& path) {
   try {
-    if (!fs::exists(path)) {
-      if (!fs::create_directories(path)) {
-        return expected<void, error_info>::err(
-            error_info("Failed to create directory: " + path.string()));
-      }
-    } else if (!fs::is_directory(path)) {
+    fs::create_directories(path);
+    if (!fs::is_directory(path))
       return expected<void, error_info>::err(
-          error_info("Path exists but is not a directory: " + path.string()));
-    }
+          error_info("Path is not a directory: " + path.string()));
     return expected<void, error_info>::ok();
   } catch (const std::exception& e) {
     return expected<void, error_info>::err(
@@ -313,126 +374,163 @@ export expected<std::vector<fs::path>, error_info> list_dir(const fs::path& path
 // Temporary file/directory management
 // ============================================================================
 
-// Generate random suffix for temp files
+// Candidate names are only hints: exclusive creation establishes ownership.
 inline std::string generate_random_suffix() {
-  static std::random_device rd;
-  static std::mt19937 gen(rd());
-  static std::uniform_int_distribution<> dis(0, 15);
-
-  const char* hex = "0123456789abcdef";
-  std::string suffix;
-  suffix.reserve(8);
-
-  for (int i = 0; i < 8; ++i) {
-    suffix += hex[dis(gen)];
-  }
-
-  return suffix;
+  thread_local std::mt19937_64 engine(std::random_device{}());
+  return std::format("{:016x}{:016x}", engine(), engine());
 }
 
-// RAII temporary file
+namespace file_detail {
+inline void validate_prefix(std::string_view prefix) {
+  if (prefix.empty() || prefix.find_first_of("/\\:") != std::string_view::npos ||
+      prefix.find('\0') != std::string_view::npos || prefix == "." || prefix == "..")
+    throw std::invalid_argument("Temporary prefix must be a filename component");
+}
+inline fs::path create_temporary(std::string_view prefix, const fs::path& parent, bool directory) {
+  validate_prefix(prefix);
+  auto absolute_parent = fs::absolute(parent);
+  for (int attempt = 0; attempt < 128; ++attempt) {
+    auto candidate = absolute_parent / (std::string(prefix) + "_" + generate_random_suffix());
+    std::error_code ec;
+    if (directory) {
+      if (fs::create_directory(candidate, ec)) return candidate;
+      if (!ec || ec == std::errc::file_exists) continue;
+      throw fs::filesystem_error("Cannot create temporary directory", candidate, ec);
+    }
+    std::ofstream file(candidate, std::ios::out | std::ios::binary | std::ios::noreplace);
+    if (file.is_open()) {
+      file.close();
+      if (file) return candidate;
+      fs::remove(candidate, ec);
+      throw std::runtime_error("Cannot close temporary file");
+    }
+    if (fs::exists(fs::symlink_status(candidate, ec))) continue;
+    throw fs::filesystem_error("Cannot create temporary file", candidate,
+                               std::make_error_code(std::errc::io_error));
+  }
+  throw std::runtime_error("Temporary name collision retry limit exceeded");
+}
+}  // namespace file_detail
+
 export class temp_file {
  public:
-  temp_file(std::string_view prefix = "tmp")
-      : path_(fs::temp_directory_path() / (std::string(prefix) + "_" + generate_random_suffix())) {
-    // Create empty file
-    std::ofstream file(path_);
-  }
-
-  ~temp_file() {
-    try {
-      if (fs::exists(path_)) {
-        fs::remove(path_);
-      }
-    } catch (...) {
-      // Ignore errors in destructor
-    }
-  }
-
-  // Non-copyable
+  explicit temp_file(std::string_view prefix = "tmp",
+                     const fs::path& parent = fs::temp_directory_path())
+      : path_(file_detail::create_temporary(prefix, parent, false)) {}
+  ~temp_file() { cleanup(); }
   temp_file(const temp_file&) = delete;
   temp_file& operator=(const temp_file&) = delete;
-
-  // Movable
-  temp_file(temp_file&& other) noexcept : path_(std::move(other.path_)) { other.path_.clear(); }
-
+  temp_file(temp_file&& other) noexcept
+      : path_(std::move(other.path_)), owned_(std::exchange(other.owned_, false)) {
+    other.path_.clear();
+  }
   temp_file& operator=(temp_file&& other) noexcept {
     if (this != &other) {
       cleanup();
       path_ = std::move(other.path_);
+      owned_ = std::exchange(other.owned_, false);
       other.path_.clear();
     }
     return *this;
   }
-
   [[nodiscard]] const fs::path& path() const noexcept { return path_; }
-
-  void keep() { path_.clear(); }
+  void keep() noexcept { owned_ = false; }
 
  private:
-  void cleanup() {
-    try {
-      if (!path_.empty() && fs::exists(path_)) {
-        fs::remove(path_);
+  void cleanup() noexcept {
+    if (owned_) {
+      try {
+        std::error_code ec;
+        fs::remove(path_, ec);
+      } catch (...) {
       }
-    } catch (...) {
-      // Ignore errors
+      owned_ = false;
     }
   }
-
   fs::path path_;
+  bool owned_ = true;
 };
 
-// RAII temporary directory
 export class temp_dir {
  public:
-  temp_dir(std::string_view prefix = "tmpdir")
-      : path_(fs::temp_directory_path() / (std::string(prefix) + "_" + generate_random_suffix())) {
-    fs::create_directory(path_);
-  }
-
-  ~temp_dir() {
-    try {
-      if (fs::exists(path_)) {
-        fs::remove_all(path_);
-      }
-    } catch (...) {
-      // Ignore errors in destructor
-    }
-  }
-
-  // Non-copyable
+  explicit temp_dir(std::string_view prefix = "tmpdir",
+                    const fs::path& parent = fs::temp_directory_path())
+      : path_(file_detail::create_temporary(prefix, parent, true)) {}
+  ~temp_dir() { cleanup(); }
   temp_dir(const temp_dir&) = delete;
   temp_dir& operator=(const temp_dir&) = delete;
-
-  // Movable
-  temp_dir(temp_dir&& other) noexcept : path_(std::move(other.path_)) { other.path_.clear(); }
-
+  temp_dir(temp_dir&& other) noexcept
+      : path_(std::move(other.path_)), owned_(std::exchange(other.owned_, false)) {
+    other.path_.clear();
+  }
   temp_dir& operator=(temp_dir&& other) noexcept {
     if (this != &other) {
       cleanup();
       path_ = std::move(other.path_);
+      owned_ = std::exchange(other.owned_, false);
       other.path_.clear();
     }
     return *this;
   }
-
   [[nodiscard]] const fs::path& path() const noexcept { return path_; }
-
-  void keep() { path_.clear(); }
+  void keep() noexcept { owned_ = false; }
 
  private:
-  void cleanup() {
-    try {
-      if (!path_.empty() && fs::exists(path_)) {
-        fs::remove_all(path_);
+  void cleanup() noexcept {
+    if (owned_) {
+      try {
+        std::error_code ec;
+        fs::remove_all(path_, ec);
+      } catch (...) {
       }
-    } catch (...) {
-      // Ignore errors
+      owned_ = false;
     }
   }
-
   fs::path path_;
+  bool owned_ = true;
 };
+
+// Replace using a sibling temporary file. Atomic visibility depends on the filesystem;
+// stream flush does not promise power-loss durability.
+export expected<void, error_info> write_file_atomic(const fs::path& path,
+                                                    std::string_view content) {
+  try {
+    auto parent = path.has_parent_path() ? path.parent_path() : fs::current_path();
+    temp_file staging("cppx_write", parent);
+    std::ofstream file(staging.path(), std::ios::binary | std::ios::trunc);
+    if (!std::in_range<std::streamsize>(content.size()))
+      throw std::length_error("File content too large");
+    if (!content.empty()) file.write(content.data(), static_cast<std::streamsize>(content.size()));
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_write)) file.setstate(std::ios::badbit);
+#endif
+    file.flush();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_flush)) file.setstate(std::ios::badbit);
+#endif
+    if (!file) throw std::runtime_error("Failed to write atomic staging file");
+    file.close();
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::file_close)) file.setstate(std::ios::badbit);
+#endif
+    if (!file) throw std::runtime_error("Failed to close atomic staging file");
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::replace))
+      throw std::system_error(std::make_error_code(std::errc::permission_denied));
+#endif
+#ifdef _WIN32
+    if (!MoveFileExW(staging.path().c_str(), path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+      throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                              "Atomic replace failed");
+#else
+    fs::rename(staging.path(), path);
+#endif
+    staging.keep();
+    return expected<void, error_info>::ok();
+  } catch (const std::exception& e) {
+    return expected<void, error_info>::err(error_info(e.what(), "write_file_atomic"));
+  }
+}
 
 }  // namespace cppx

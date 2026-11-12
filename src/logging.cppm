@@ -5,6 +5,7 @@ module;
 
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
+  #define NOMINMAX
   #include <Windows.h>
   #include <fcntl.h>
   #include <io.h>
@@ -16,7 +17,11 @@ export module cppx.logging;
 
 import std;
 import cppx.error;
+#ifdef CPPX_FAULT_INJECTION
+import cppx.fault_injection;
+#endif
 import cppx.string_utils;
+import cppx.time_utils;
 
 namespace cppx {
 
@@ -70,18 +75,9 @@ constexpr std::string_view log_level_color(log_level level) {
 
 inline std::string format_timestamp() {
   auto now = std::chrono::system_clock::now();
-  auto time = std::chrono::system_clock::to_time_t(now);
-  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-  std::tm* tm_ptr = std::localtime(&time);
-  if (!tm_ptr) {
-    return "";
-  }
-
-  char buffer[32];
-  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_ptr);
-
-  return std::format("{}.{:03d}", buffer, ms.count());
+  auto ms = std::chrono::floor<std::chrono::milliseconds>(now) -
+            std::chrono::floor<std::chrono::seconds>(now);
+  return std::format("{}.{:03}", format_time(now), ms.count());
 }
 
 // ============================================================================
@@ -150,7 +146,10 @@ class console_sink : public log_sink {
 #endif
   }
 
-  void flush() override { std::cout.flush(); }
+  void flush() override {
+    std::cout.flush();
+    if (!std::cout) throw std::runtime_error("Console flush failed");
+  }
 
   bool use_color() const { return use_color_; }
 
@@ -175,29 +174,38 @@ class file_sink : public log_sink {
   void write(const std::string& message) override {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (current_size_ >= max_size_) {
+    if (max_size_ > 0 && current_size_ > 0 &&
+        (current_size_ >= max_size_ || message.size() >= max_size_ - current_size_)) {
       rotate();
     }
 
-    if (file_.is_open()) {
-      file_ << message << '\n';
-      current_size_ += message.size() + 1;
-    }
+    if (!file_.is_open()) throw std::runtime_error("Log file is not open");
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::log_write)) file_.setstate(std::ios::badbit);
+#endif
+    file_ << message << '\n';
+    current_size_ += message.size() + 1;
   }
 
   void flush() override {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (file_.is_open()) {
-      file_.flush();
-    }
+    if (!file_.is_open()) throw std::runtime_error("Log file is not open");
+#ifdef CPPX_FAULT_INJECTION
+    if (testing::hit(testing::fault::log_flush)) file_.setstate(std::ios::badbit);
+#endif
+    file_.flush();
   }
 
  private:
   void open_file() {
-    file_.open(path_, std::ios::app);
+    file_.exceptions(std::ios::badbit | std::ios::failbit);
+    file_.open(path_, std::ios::app | std::ios::binary);
     if (file_.is_open()) {
       file_.seekp(0, std::ios::end);
-      current_size_ = file_.tellp();
+      auto position = file_.tellp();
+      if (position < 0 || !std::in_range<size_t>(static_cast<std::streamoff>(position)))
+        throw std::runtime_error("Invalid log file size");
+      current_size_ = static_cast<size_t>(position);
     }
   }
 
@@ -217,7 +225,8 @@ class file_sink : public log_sink {
         if (i == 4) {
           std::filesystem::remove(old_path);
         } else {
-          auto new_path = path_.string() + "." + std::to_string(i + 1);
+          auto new_path = path_;
+          new_path += "." + std::to_string(i + 1);
           std::filesystem::rename(old_path, new_path);
         }
       }
@@ -246,9 +255,9 @@ export class logger {
   }
 
   // Set log level
-  void set_level(log_level level) { level_ = level; }
+  void set_level(log_level level) noexcept { level_.store(level, std::memory_order_relaxed); }
 
-  [[nodiscard]] log_level get_level() const { return level_; }
+  [[nodiscard]] log_level get_level() const { return level_.load(std::memory_order_relaxed); }
 
   // Add sinks
   void add_console_sink(bool use_color = true) {
@@ -258,7 +267,9 @@ export class logger {
 
   void add_file_sink(const std::filesystem::path& path, size_t max_size = 10 * 1024 * 1024) {
     std::lock_guard<std::mutex> lock(mutex_);
-    file_sink_ = std::make_unique<file_sink>(path, max_size);
+    auto replacement = std::make_unique<file_sink>(path, max_size);
+    if (file_sink_) file_sink_->flush();
+    file_sink_ = std::move(replacement);
   }
 
   void remove_console_sink() {
@@ -268,7 +279,8 @@ export class logger {
 
   void remove_file_sink() {
     std::lock_guard<std::mutex> lock(mutex_);
-    file_sink_.reset();
+    auto detached = std::move(file_sink_);
+    if (detached) detached->flush();
   }
 
   // Log methods
@@ -312,9 +324,22 @@ export class logger {
     }
   }
 
+  // Destructors cannot throw. log_scope retains its failure here for later inspection.
+  void record_error(std::exception_ptr error) noexcept {
+    try {
+      std::lock_guard lock(error_mutex_);
+      last_error_ = std::move(error);
+    } catch (...) {
+    }
+  }
+  [[nodiscard]] std::exception_ptr last_error() const {
+    std::lock_guard lock(error_mutex_);
+    return last_error_;
+  }
+
  private:
   void log(log_level level, const std::string& message) {
-    if (level < level_) {
+    if (level < get_level()) {
       return;
     }
 
@@ -345,8 +370,10 @@ export class logger {
     }
   }
 
+  mutable std::mutex error_mutex_;
+  std::exception_ptr last_error_;
   std::string name_;
-  log_level level_;
+  std::atomic<log_level> level_;
   std::unique_ptr<console_sink> console_sink_;
   std::unique_ptr<file_sink> file_sink_;
   std::mutex mutex_;
@@ -433,7 +460,11 @@ export class log_scope {
     if (logger_) {
       auto end = std::chrono::steady_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_);
-      logger_->debug("Exiting scope: {} (took {}ms)", scope_name_, duration.count());
+      try {
+        logger_->debug("Exiting scope: {} (took {}ms)", scope_name_, duration.count());
+      } catch (...) {
+        logger_->record_error(std::current_exception());
+      }
     }
   }
 

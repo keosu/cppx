@@ -26,6 +26,8 @@ xmake build -j 2
 xmake test
 ```
 
+切换构建模式、编译器或运行库后若出现 MSVC C5050（`_DEBUG` 与导入模块不一致），执行 `xmake build -r -j 2` 强制重建全部模块与消费者，再运行测试；带有该警告的旧缓存结果不能作为验收依据。
+
 代码格式使用 clang-format 18，与 CI 一致。对修改的文件运行格式化后，用 `--dry-run --Werror` 检查。根目录的 `.clang-format` 为配置来源。
 
 ## 测试约定
@@ -43,3 +45,5 @@ xmake test
 一次变更聚焦一个可独立验证的行为或交付能力。新增功能应说明产品场景、API 契约和失败模式。架构方向记录在 `docs/decisions/`，风险状态和阶段完成情况更新到项目评估与路线。
 
 在 1.0 之前允许必要的 API 调整，但不得静默改变用户可观察语义。禁止将库内部进程退出、丢失精度或吞掉 I/O 错误作为默认的失败处理方式。
+
+质量任务、机器可读报告、可复现基准与长期运行命令见 [QUALITY.md](docs/QUALITY.md)。源码包生成与升级演练见 [RELEASE_POLICY.md](docs/RELEASE_POLICY.md)。提交前使用 `xmake format --check`（包括 quality/ 下的 C++ 文件）；记录实际平台结果，新增 CI 配置不等于新增正式支持平台。

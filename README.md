@@ -2,7 +2,7 @@
 
 面向跨平台产品的 C++23 通用基础库，提供错误处理、字符串、文件系统、日志、时间、并发、数学、命令行、JSON 序列化与测试工具。
 
-当前版本为 **0.1.0，工程化建设阶段**。现有实现采用 C++ modules 和 `import std`，当前验证平台是 Windows x64 + MSVC；Linux、macOS 的支持正在规划中。API、线程安全和分发能力仍在完善，尚未达到 1.0 的生产验收标准。
+当前版本为 **0.1.0，工程化建设阶段**。现有实现采用 C++ modules 和 `import std`，当前验证平台是 Windows x64 + MSVC；Linux Clang 18 已通过模块能力探针，完整 CI 验收正在推进；GCC/macOS 仍为实验性组合。API、线程安全和分发能力仍在完善，尚未达到 1.0 的生产验收标准。
 
 本项目没有第三方运行时依赖。测试通过率不等于代码覆盖率，当前尚无经测量的覆盖率报告。
 
@@ -13,6 +13,8 @@
 - [当前开发状态](docs/STATUS.md)：最近检查点、已完成验证和恢复工作的顺序。
 - [项目评估](docs/PROJECT_ASSESSMENT.md)：架构、已复现缺陷、风险优先级与验证边界。
 - [分阶段路线](docs/ROADMAP.md)：每个阶段的交付物、依赖和验收条件。
+- [质量与性能验证](docs/QUALITY.md)：故障注入、ASan、输入差分、压力与可复现基准。
+- [源码包与发布政策](docs/RELEASE_POLICY.md)：私有 xrepo、版本/ABI、升级与回滚。
 - [跨平台技术方向](docs/decisions/0001-cross-platform-baseline.md)：工具链矩阵、公共接口与模块分发的选择。
 - [贡献与验证](CONTRIBUTING.md)：构建、回归测试和提交要求。
 - [xmake 接入与验证](docs/XMAKE_INTEGRATION.md)：源码接入、本地模块包、工具链探针和独立消费者。
@@ -44,7 +46,7 @@ xmake build -j 2
 xmake test
 ```
 
-默认构建库、11 个测试程序和 10 个示例。每个测试程序超时为 60 秒，测试结果以进程退出码判定。`test_runner_contract` 通过独立检查验证测试框架自身的失败检测、SECTION 隔离和断言保留行为。
+默认构建库、12 个测试程序和 10 个示例。每个测试程序超时为 60 秒，测试结果以进程退出码判定。`test_runner_contract` 验证测试框架自身的失败检测、SECTION 隔离和断言保留；`test_core_contract` 独立验证核心模块的输入边界、异常、关闭与资源生命周期。
 
 源码作为子项目嵌入时，测试和示例默认关闭。单独配置库也可使用：
 
@@ -82,7 +84,7 @@ xmake run serialization_demo
 | `cppx.serialization` | JSON、结构体与枚举序列化 |
 | `cppx.test` | 测试注册、断言、SECTION 和报告 |
 
-各模块的已知限制见项目评估；尤其应先修复 JSON 数据保真、时间解析和并发生命周期问题，再将其作为产品基础设施。
+已完成 R01–R09 核心正确性修复，包括 JSON 数据保真、严格解析、时间、并发、文件、日志和 CLI/数学边界。新增接口与行为变化见 [核心契约与迁移说明](docs/CORE_CONTRACTS.md)；跨平台与长期稳定性目标仍按路线图推进。
 
 ## 使用示例
 
@@ -122,6 +124,7 @@ target_end()
 
 ## 参考文档
 
+- [核心契约与迁移说明](docs/CORE_CONTRACTS.md)
 - [API 参考](docs/API.md)
 - [测试框架](docs/TEST_FRAMEWORK.md)
 - [序列化宏](docs/SERIALIZATION_MACROS.md)
@@ -131,3 +134,14 @@ target_end()
 部分早期 API/设计文档仍需逐项校验；能力与支持范围以当前代码、测试和项目评估为准。
 
 MIT License，见 [LICENSE](LICENSE)。
+
+开发质量检查和分发验证（输出目录需为新目录）：
+
+```sh
+python scripts/verify.py --output build/quality --sanitizer address --seconds 60
+python scripts/benchmark.py --output build/performance
+python scripts/package.py --output build/release-candidate --verify
+python scripts/verify_upgrade.py --baseline HEAD --output build/upgrade
+```
+
+`cppx_components` 可选择逗号分隔的模块列表并自动补齐依赖；源码嵌入和包消费者默认不构建开发工具。使用方法和验证边界见上述质量与发布文档。

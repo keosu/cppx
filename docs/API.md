@@ -1,4 +1,6 @@
 
+
+2026-10-11 核心修复的错误、线程安全、编码与迁移要求见 [CORE_CONTRACTS.md](CORE_CONTRACTS.md)。本文的示例须结合该契约使用。
 # cppx API Documentation
 
 Complete API reference for all modules in the cppx library.
@@ -369,7 +371,7 @@ auto hr = format_duration(milliseconds(3661000)); // "1h 1m 1s"
 ### Time Parsing
 
 ```cpp
-auto tp = parse_iso8601("2025-12-05T10:30:45");
+auto tp = parse_iso8601("2025-12-05T10:30:45Z");
 auto custom = parse_time("2025/12/05 10:30", "%Y/%m/%d %H:%M");
 ```
 
@@ -724,6 +726,10 @@ parser.add_flag("verbose", "v", "Verbose output");
 auto result = parser.parse(argc, argv);
 if (result.is_ok()) {
     auto& args = result.value();
+    if (args.help_requested()) {
+        std::cout << args.help_text();
+        return 0;
+    }
     auto input = args.get_string("input");
     bool verbose = args.get_flag("verbose");
 }
@@ -752,6 +758,10 @@ parser.set_choices("format", {"json", "xml", "csv"});
 auto result = parser.parse(args);
 if (result.is_ok()) {
     auto& parsed = result.value();
+    if (parsed.help_requested()) {
+        std::cout << parsed.help_text();
+        return 0;
+    }
     
     // Get string
     auto str = parsed.get_string("name");  // optional<string>
@@ -790,7 +800,17 @@ push_cmd->add_positional("remote", "Remote name");
 
 ### Help Generation
 
-Help is automatically generated. Use `--help` or `-h` to display it:
+Help is generated on `--help` or `-h` and returned to the host. Parsing does not print or exit:
+
+```cpp
+auto result = parser.parse(argc, argv);
+if (result && result.value().help_requested()) {
+    std::cout << result.value().help_text();
+    return 0;
+}
+```
+
+Example help text:
 
 ```
 myapp - My application
@@ -821,7 +841,7 @@ OPTIONS:
 Prefer `expected<T, E>` over exceptions for recoverable errors:
 
 ```cpp
-auto result = read_file("config.json");
+auto result = read_file_text("config.json");
 if (result.is_err()) {
     // Handle error gracefully
     logger->error("Config error: {}", result.error().message());

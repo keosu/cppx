@@ -1,0 +1,16 @@
+package("cppx")
+    set_homepage("https://github.com/keosu/cppx")
+    set_description("C++23 utility modules")
+    set_license("MIT")
+    add_urls("@URL@")
+    add_versions("@VERSION@", "@SHA256@")
+    add_configs("shared", {description = "Only static libraries are supported", default = false,
+                           type = "boolean", readonly = true})
+    add_configs("components", {description = "Comma-separated cppx modules", default = "all", type = "string"})
+    on_install(function (package)
+        local configs = {cppx_build_tests = false, cppx_build_examples = false,
+                         cppx_build_quality = false, cppx_build_benchmarks = false,
+                         cppx_fault_injection = false, cppx_components = package:config("components")}
+        import("package.tools.xmake").install(package, configs)
+    end)
+package_end()

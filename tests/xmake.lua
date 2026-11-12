@@ -17,6 +17,7 @@ function add_cppx_test(name, source_file, default_build)
         
         add_files(source_file)
         add_deps("cppx")
+        add_rules("cppx.instrument")
         
         -- Module support
         set_policy("build.c++.modules", true)
@@ -40,3 +41,7 @@ add_cppx_test("test_cli", "test_cli.cpp")
 add_cppx_test("test_test", "test_test.cpp")
 add_cppx_test("test_runner_contract", "test_runner_contract.cpp")
 add_cppx_test("test_serialization", "test_serialization.cpp")
+add_cppx_test("test_core_contract", "test_core_contract.cpp")
+if has_config("cppx_fault_injection") then
+    add_cppx_test("test_fault_injection", "test_fault_injection.cpp")
+end

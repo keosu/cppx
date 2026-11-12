@@ -1,6 +1,6 @@
 # cppx.serialization - 实现状态
 
-> 2026-10-10 复核：下文为早期开发记录，不能作为当前生产就绪声明。当前测试与示例中的宏已经可以在本地 MSVC 基线上构建；JSON 仍有 Unicode 转义丢失、整数精度、严格语法和资源上限问题，证据及任务见 [项目评估](PROJECT_ASSESSMENT.md) 和 [路线](ROADMAP.md)。
+> 2026-10-11 复核：R02/R03 已修复 Unicode、整数精度、严格语法、重复键和资源上限，见 [核心契约与迁移说明](CORE_CONTRACTS.md)。下文仍为早期开发记录，不作为当前 API 或生产就绪声明；测试和示例已进入 Windows/MSVC 回归。
 
 ## ✅ 已完成功能（Phase 1）
 
@@ -45,7 +45,7 @@
 - ✅ `load_json<T>(path)` - 从文件加载
 
 ### 4. 示例和文档
-- ✅ `examples/serialization_simple_demo.cpp` - 完整的功能演示
+- ✅ `examples/serialization_demo.cpp` - 完整的功能演示
 - ✅ `docs/SERIALIZATION_DESIGN.md` - 详细设计文档
 - ✅ 运行成功，输出正确
 
@@ -204,7 +204,7 @@ A: 自动支持！只要每个嵌套类型都有 `serializer` 特化即可。
 ## 📚 参考资源
 
 - 设计文档：`docs/SERIALIZATION_DESIGN.md`
-- 示例代码：`examples/serialization_simple_demo.cpp`
+- 示例代码：`examples/serialization_demo.cpp`
 - 模块源码：`src/serialization.cppm`
 
 ## 🚀 下一步计划

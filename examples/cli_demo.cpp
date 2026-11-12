@@ -86,6 +86,10 @@ int main(int argc, char** argv) {
   } else {
     // Parse actual command-line arguments
     auto result = parser.parse(argc, argv);
+    if (result && result.value().help_requested()) {
+      std::cout << result.value().help_text();
+      return 0;
+    }
 
     if (result.is_ok()) {
       logger->info("✓ Arguments parsed successfully!\n");

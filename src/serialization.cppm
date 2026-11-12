@@ -8,6 +8,72 @@ export namespace cppx {
 // JSON 类型定义
 // ============================================================================
 
+struct json_parse_options {
+  size_t max_input_bytes = 16 * 1024 * 1024;
+  size_t max_depth = 128;
+};
+
+class json_parse_error : public std::runtime_error {
+ public:
+  json_parse_error(std::string_view message, size_t position)
+      : std::runtime_error(std::format("{} at byte {}", message, position)), position_(position) {}
+  [[nodiscard]] size_t position() const noexcept { return position_; }
+
+ private:
+  size_t position_;
+};
+
+namespace json_detail {
+inline bool valid_utf8(std::string_view input) {
+  for (size_t i = 0; i < input.size();) {
+    auto c = static_cast<unsigned char>(input[i++]);
+    if (c < 0x80) continue;
+    unsigned count = 0;
+    unsigned code = 0;
+    unsigned minimum = 0;
+    if (c >= 0xc2 && c <= 0xdf) {
+      count = 1;
+      code = c & 0x1f;
+      minimum = 0x80;
+    } else if (c >= 0xe0 && c <= 0xef) {
+      count = 2;
+      code = c & 0x0f;
+      minimum = 0x800;
+    } else if (c >= 0xf0 && c <= 0xf4) {
+      count = 3;
+      code = c & 7;
+      minimum = 0x10000;
+    } else
+      return false;
+    if (input.size() - i < count) return false;
+    while (count--) {
+      auto next = static_cast<unsigned char>(input[i++]);
+      if ((next & 0xc0) != 0x80) return false;
+      code = (code << 6) | (next & 0x3f);
+    }
+    if (code < minimum || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return false;
+  }
+  return true;
+}
+inline void append_utf8(std::string& out, unsigned code) {
+  if (code < 0x80)
+    out += static_cast<char>(code);
+  else if (code < 0x800) {
+    out += static_cast<char>(0xc0 | (code >> 6));
+    out += static_cast<char>(0x80 | (code & 0x3f));
+  } else if (code < 0x10000) {
+    out += static_cast<char>(0xe0 | (code >> 12));
+    out += static_cast<char>(0x80 | ((code >> 6) & 0x3f));
+    out += static_cast<char>(0x80 | (code & 0x3f));
+  } else {
+    out += static_cast<char>(0xf0 | (code >> 18));
+    out += static_cast<char>(0x80 | ((code >> 12) & 0x3f));
+    out += static_cast<char>(0x80 | ((code >> 6) & 0x3f));
+    out += static_cast<char>(0x80 | (code & 0x3f));
+  }
+}
+}  // namespace json_detail
+
 class json {
  public:
   enum class type { null, boolean, number, string, array, object };
@@ -16,8 +82,8 @@ class json {
   using object_type = std::map<std::string, json>;
 
  private:
-  using value_type =
-      std::variant<std::nullptr_t, bool, double, std::string, array_type, object_type>;
+  using value_type = std::variant<std::nullptr_t, bool, double, std::string, array_type,
+                                  object_type, std::int64_t, std::uint64_t>;
 
   value_type value_;
 
@@ -26,15 +92,22 @@ class json {
   json() : value_(nullptr) {}
   json(std::nullptr_t) : value_(nullptr) {}
   json(bool v) : value_(v) {}
-  json(int v) : value_(static_cast<double>(v)) {}
-  json(long v) : value_(static_cast<double>(v)) {}
-  json(long long v) : value_(static_cast<double>(v)) {}
-  json(unsigned int v) : value_(static_cast<double>(v)) {}
-  json(unsigned long v) : value_(static_cast<double>(v)) {}
-  json(unsigned long long v) : value_(static_cast<double>(v)) {}
-  json(float v) : value_(static_cast<double>(v)) {}
-  json(double v) : value_(v) {}
-  json(const char* v) : value_(std::string(v)) {}
+  template <std::integral T>
+    requires(!std::same_as<T, bool>)
+  json(T v) {
+    if constexpr (std::is_signed_v<T>)
+      value_ = static_cast<std::int64_t>(v);
+    else
+      value_ = static_cast<std::uint64_t>(v);
+  }
+  json(float v) : json(static_cast<double>(v)) {}
+  json(double v) : value_(v) {
+    if (!std::isfinite(v)) throw std::invalid_argument("JSON numbers must be finite");
+  }
+  json(const char* v) : value_(nullptr) {
+    if (!v) throw std::invalid_argument("JSON string pointer is null");
+    value_ = std::string(v);
+  }
   json(std::string v) : value_(std::move(v)) {}
   json(std::string_view v) : value_(std::string(v)) {}
   json(array_type v) : value_(std::move(v)) {}
@@ -67,11 +140,15 @@ class json {
   static json array() { return json(array_type{}); }
 
   // 类型检查
-  type get_type() const { return static_cast<type>(value_.index()); }
+  type get_type() const { return is_number() ? type::number : static_cast<type>(value_.index()); }
 
   bool is_null() const { return std::holds_alternative<std::nullptr_t>(value_); }
   bool is_bool() const { return std::holds_alternative<bool>(value_); }
-  bool is_number() const { return std::holds_alternative<double>(value_); }
+  bool is_integer() const { return std::holds_alternative<std::int64_t>(value_); }
+  bool is_unsigned() const { return std::holds_alternative<std::uint64_t>(value_); }
+  bool is_number() const {
+    return is_integer() || is_unsigned() || std::holds_alternative<double>(value_);
+  }
   bool is_string() const { return std::holds_alternative<std::string>(value_); }
   bool is_array() const { return std::holds_alternative<array_type>(value_); }
   bool is_object() const { return std::holds_alternative<object_type>(value_); }
@@ -84,10 +161,39 @@ class json {
 
   double as_number() const {
     if (auto* v = std::get_if<double>(&value_)) return *v;
+    if (auto* v = std::get_if<std::int64_t>(&value_)) return static_cast<double>(*v);
+    if (auto* v = std::get_if<std::uint64_t>(&value_)) return static_cast<double>(*v);
     throw std::runtime_error("json value is not a number");
   }
 
-  int as_int() const { return static_cast<int>(as_number()); }
+  template <std::integral T>
+    requires(!std::same_as<T, bool>)
+  T as_integer() const {
+    if (auto* v = std::get_if<std::int64_t>(&value_)) {
+      if constexpr (std::is_signed_v<T>) {
+        if (*v >= static_cast<std::int64_t>(std::numeric_limits<T>::min()) &&
+            *v <= static_cast<std::int64_t>(std::numeric_limits<T>::max()))
+          return static_cast<T>(*v);
+      } else {
+        if (*v >= 0 && static_cast<std::uint64_t>(*v) <= std::numeric_limits<T>::max())
+          return static_cast<T>(*v);
+      }
+    } else if (auto* v = std::get_if<std::uint64_t>(&value_)) {
+      if (*v <= static_cast<std::uint64_t>(std::numeric_limits<T>::max()))
+        return static_cast<T>(*v);
+    } else {
+      double number = as_number();
+      double upper = std::ldexp(1.0, std::numeric_limits<T>::digits);
+      double lower = std::is_signed_v<T> ? -upper : 0.0;
+      if (std::isfinite(number) && std::trunc(number) == number && number >= lower &&
+          number < upper)
+        return static_cast<T>(number);
+    }
+    throw std::out_of_range("JSON integer conversion is fractional or out of range");
+  }
+  int as_int() const { return as_integer<int>(); }
+  std::int64_t as_int64() const { return as_integer<std::int64_t>(); }
+  std::uint64_t as_uint64() const { return as_integer<std::uint64_t>(); }
 
   const std::string& as_string() const {
     if (auto* v = std::get_if<std::string>(&value_)) return *v;
@@ -116,7 +222,21 @@ class json {
 
   // 通用模板访问
   template <typename T>
-  T as() const;
+  T as() const {
+    if constexpr (std::same_as<T, bool>)
+      return as_bool();
+    else if constexpr (std::integral<T>)
+      return as_integer<T>();
+    else if constexpr (std::floating_point<T>) {
+      auto value = as_number();
+      if (value < -std::numeric_limits<T>::max() || value > std::numeric_limits<T>::max())
+        throw std::out_of_range("JSON floating conversion out of range");
+      return static_cast<T>(value);
+    } else if constexpr (std::same_as<T, std::string>)
+      return as_string();
+    else
+      static_assert(std::is_arithmetic_v<T>, "Unsupported JSON value access type");
+  }
 
   // 对象操作
   json& operator[](const std::string& key) {
@@ -145,10 +265,10 @@ class json {
     if (!is_array()) {
       throw std::runtime_error("json value is not an array");
     }
-    return as_array()[index];
+    return as_array().at(index);
   }
 
-  const json& operator[](size_t index) const { return as_array()[index]; }
+  const json& operator[](size_t index) const { return as_array().at(index); }
 
   size_t size() const {
     if (is_array()) return as_array().size();
@@ -164,13 +284,17 @@ class json {
   }
 
   // 序列化为字符串
-  std::string dump(int indent = -1) const { return dump_impl(indent, 0); }
+  std::string dump(int indent = -1) const {
+    if (indent < -1 || indent > 1024) throw std::invalid_argument("JSON indent must be -1..1024");
+    return dump_impl(indent, 0);
+  }
 
   // 从字符串解析
-  static json parse(std::string_view str);
+  static json parse(std::string_view str, json_parse_options options = {});
 
  private:
   std::string dump_impl(int indent, int current_depth) const {
+    if (current_depth > 512) throw std::length_error("JSON output nesting limit exceeded");
     std::string result;
 
     if (is_null()) {
@@ -178,12 +302,13 @@ class json {
     } else if (is_bool()) {
       result = as_bool() ? "true" : "false";
     } else if (is_number()) {
-      double num = as_number();
-      // 检查是否为整数
-      if (num == static_cast<long long>(num)) {
-        result = std::to_string(static_cast<long long>(num));
-      } else {
-        result = std::format("{}", num);
+      if (is_integer())
+        result = std::to_string(std::get<std::int64_t>(value_));
+      else if (is_unsigned())
+        result = std::to_string(std::get<std::uint64_t>(value_));
+      else {
+        result = std::format("{}", as_number());
+        if (result.find_first_of(".eE") == std::string::npos) result += ".0";
       }
     } else if (is_string()) {
       result = "\"" + escape_string(as_string()) + "\"";
@@ -246,7 +371,8 @@ class json {
 
   static std::string escape_string(const std::string& str) {
     std::string result;
-    for (char c : str) {
+    if (!json_detail::valid_utf8(str)) throw std::invalid_argument("JSON string is not UTF-8");
+    for (unsigned char c : str) {
       switch (c) {
         case '\"': result += "\\\""; break;
         case '\\': result += "\\\\"; break;
@@ -267,239 +393,197 @@ class json {
   }
 };
 
-// json::as<T> 特化
-template <>
-inline bool json::as<bool>() const {
-  return as_bool();
-}
-template <>
-inline int json::as<int>() const {
-  return as_int();
-}
-template <>
-inline double json::as<double>() const {
-  return as_number();
-}
-template <>
-inline std::string json::as<std::string>() const {
-  return as_string();
-}
-
-// ============================================================================
-// JSON 解析器
-// ============================================================================
-
+// Strict parser: errors use zero-based byte positions and limits count containers.
 class json_parser {
- private:
-  std::string_view input_;
-  size_t pos_ = 0;
-
  public:
-  explicit json_parser(std::string_view input) : input_(input) {}
-
+  explicit json_parser(std::string_view input, json_parse_options options = {})
+      : input_(input), options_(options) {}
   json parse() {
-    skip_whitespace();
-    auto result = parse_value();
-    skip_whitespace();
-    if (pos_ < input_.size()) {
-      throw std::runtime_error("unexpected characters after JSON value");
-    }
+    if (input_.size() > options_.max_input_bytes) fail("JSON input size limit exceeded");
+    if (options_.max_depth > 512) throw std::invalid_argument("JSON depth limit must be <= 512");
+    auto result = parse_value(0);
+    whitespace();
+    if (pos_ != input_.size()) fail("Unexpected trailing input");
     return result;
   }
 
  private:
-  char peek() const {
-    if (pos_ >= input_.size()) return '\0';
-    return input_[pos_];
-  }
-
+  std::string_view input_;
+  json_parse_options options_;
+  size_t pos_ = 0;
+  [[noreturn]] void fail(std::string_view message) const { throw json_parse_error(message, pos_); }
+  char peek() const { return pos_ < input_.size() ? input_[pos_] : '\0'; }
   char next() {
-    if (pos_ >= input_.size()) return '\0';
+    if (pos_ == input_.size()) fail("Unexpected end of input");
     return input_[pos_++];
   }
-
-  void skip_whitespace() {
-    while (pos_ < input_.size() && std::isspace(input_[pos_])) {
-      ++pos_;
+  static bool digit(char c) { return c >= '0' && c <= '9'; }
+  void whitespace() {
+    while (peek() == ' ' || peek() == '\t' || peek() == '\n' || peek() == '\r') ++pos_;
+  }
+  json literal(std::string_view token, json result) {
+    if (input_.substr(pos_, token.size()) != token) fail("Invalid literal");
+    pos_ += token.size();
+    return result;
+  }
+  json parse_value(size_t depth) {
+    whitespace();
+    switch (peek()) {
+      case 'n': return literal("null", json(nullptr));
+      case 't': return literal("true", json(true));
+      case 'f': return literal("false", json(false));
+      case '"': return json(parse_string());
+      case '[':
+      case '{': {
+        if (depth >= options_.max_depth) fail("JSON nesting limit exceeded");
+        return peek() == '[' ? parse_array(depth + 1) : parse_object(depth + 1);
+      }
+      default:
+        if (peek() == '-' || digit(peek())) return parse_number();
+        fail("Expected JSON value");
     }
   }
-
-  json parse_value() {
-    skip_whitespace();
-    char c = peek();
-
-    if (c == '\0') throw std::runtime_error("unexpected end of JSON input");
-
-    if (c == 'n') return parse_null();
-    if (c == 't' || c == 'f') return parse_bool();
-    if (c == '"') return parse_string();
-    if (c == '[') return parse_array();
-    if (c == '{') return parse_object();
-    if (c == '-' || std::isdigit(c)) return parse_number();
-
-    throw std::runtime_error(std::format("unexpected character: '{}'", c));
-  }
-
-  json parse_null() {
-    if (input_.substr(pos_, 4) == "null") {
-      pos_ += 4;
-      return json(nullptr);
-    }
-    throw std::runtime_error("invalid null value");
-  }
-
-  json parse_bool() {
-    if (input_.substr(pos_, 4) == "true") {
-      pos_ += 4;
-      return json(true);
-    }
-    if (input_.substr(pos_, 5) == "false") {
-      pos_ += 5;
-      return json(false);
-    }
-    throw std::runtime_error("invalid boolean value");
-  }
-
   json parse_number() {
-    size_t start = pos_;
-
-    if (peek() == '-') next();
-
-    if (!std::isdigit(peek())) {
-      throw std::runtime_error("invalid number");
+    auto start = pos_;
+    bool negative = peek() == '-';
+    if (negative) ++pos_;
+    if (peek() == '0') {
+      ++pos_;
+      if (digit(peek())) fail("Leading zero in number");
+    } else {
+      if (!digit(peek())) fail("Expected digit");
+      while (digit(peek())) ++pos_;
     }
-
-    while (std::isdigit(peek())) next();
-
+    bool floating = false;
     if (peek() == '.') {
-      next();
-      if (!std::isdigit(peek())) {
-        throw std::runtime_error("invalid number");
-      }
-      while (std::isdigit(peek())) next();
+      floating = true;
+      ++pos_;
+      if (!digit(peek())) fail("Expected fraction digits");
+      while (digit(peek())) ++pos_;
     }
-
     if (peek() == 'e' || peek() == 'E') {
-      next();
-      if (peek() == '+' || peek() == '-') next();
-      if (!std::isdigit(peek())) {
-        throw std::runtime_error("invalid number");
-      }
-      while (std::isdigit(peek())) next();
+      floating = true;
+      ++pos_;
+      if (peek() == '+' || peek() == '-') ++pos_;
+      if (!digit(peek())) fail("Expected exponent digits");
+      while (digit(peek())) ++pos_;
     }
-
-    std::string num_str(input_.substr(start, pos_ - start));
-    return json(std::stod(num_str));
+    auto first = input_.data() + start;
+    auto last = input_.data() + pos_;
+    if (floating) {
+      double value{};
+      auto result = std::from_chars(first, last, value, std::chars_format::general);
+      if (result.ec != std::errc{} || result.ptr != last || !std::isfinite(value))
+        fail("Floating number out of range");
+      return json(value);
+    }
+    if (negative) {
+      std::int64_t value{};
+      auto result = std::from_chars(first, last, value);
+      if (result.ec != std::errc{}) fail("Signed integer out of range");
+      return json(value);
+    }
+    std::uint64_t value{};
+    auto result = std::from_chars(first, last, value);
+    if (result.ec != std::errc{}) fail("Unsigned integer out of range");
+    return json(value);
   }
-
-  json parse_string() {
-    if (next() != '"') throw std::runtime_error("expected '\"'");
-
-    std::string result;
-    while (true) {
+  unsigned hex4() {
+    unsigned value = 0;
+    for (int i = 0; i < 4; ++i) {
       char c = next();
-      if (c == '\0') throw std::runtime_error("unterminated string");
+      unsigned digit_value;
+      if (c >= '0' && c <= '9')
+        digit_value = c - '0';
+      else if (c >= 'a' && c <= 'f')
+        digit_value = c - 'a' + 10;
+      else if (c >= 'A' && c <= 'F')
+        digit_value = c - 'A' + 10;
+      else
+        fail("Invalid Unicode escape");
+      value = (value << 4) | digit_value;
+    }
+    return value;
+  }
+  std::string parse_string() {
+    if (next() != '"') fail("Expected string");
+    std::string out;
+    while (true) {
+      auto c = static_cast<unsigned char>(next());
       if (c == '"') break;
-
-      if (c == '\\') {
-        c = next();
-        switch (c) {
-          case '"': result += '"'; break;
-          case '\\': result += '\\'; break;
-          case '/': result += '/'; break;
-          case 'b': result += '\b'; break;
-          case 'f': result += '\f'; break;
-          case 'n': result += '\n'; break;
-          case 'r': result += '\r'; break;
-          case 't': result += '\t'; break;
-          case 'u': {
-            // Unicode escape \uXXXX
-            std::string hex;
-            for (int i = 0; i < 4; ++i) {
-              char h = next();
-              if (!std::isxdigit(h)) {
-                throw std::runtime_error("invalid unicode escape");
-              }
-              hex += h;
-            }
-            int codepoint = std::stoi(hex, nullptr, 16);
-            if (codepoint < 0x80) {
-              result += static_cast<char>(codepoint);
-            } else {
-              // 简化处理：只支持基本的 Unicode
-              result += '?';
-            }
-            break;
-          }
-          default: throw std::runtime_error(std::format("invalid escape sequence: \\{}", c));
+      if (c < 0x20) fail("Unescaped control character");
+      if (c != '\\') {
+        out += static_cast<char>(c);
+        continue;
+      }
+      switch (next()) {
+        case '"': out += '"'; break;
+        case '\\': out += '\\'; break;
+        case '/': out += '/'; break;
+        case 'b': out += '\b'; break;
+        case 'f': out += '\f'; break;
+        case 'n': out += '\n'; break;
+        case 'r': out += '\r'; break;
+        case 't': out += '\t'; break;
+        case 'u': {
+          unsigned code = hex4();
+          if (code >= 0xd800 && code <= 0xdbff) {
+            if (next() != '\\' || next() != 'u') fail("Expected low surrogate");
+            auto low = hex4();
+            if (low < 0xdc00 || low > 0xdfff) fail("Invalid low surrogate");
+            code = 0x10000 + ((code - 0xd800) << 10) + low - 0xdc00;
+          } else if (code >= 0xdc00 && code <= 0xdfff)
+            fail("Unpaired low surrogate");
+          json_detail::append_utf8(out, code);
+          break;
         }
-      } else {
-        result += c;
+        default: fail("Invalid string escape");
       }
     }
-
-    return json(result);
+    if (!json_detail::valid_utf8(out)) fail("Invalid UTF-8 string");
+    return out;
   }
-
-  json parse_array() {
-    if (next() != '[') throw std::runtime_error("expected '['");
-
-    json::array_type arr;
-    skip_whitespace();
-
+  json parse_array(size_t depth) {
+    ++pos_;
+    json::array_type out;
+    whitespace();
     if (peek() == ']') {
-      next();
-      return json(arr);
+      ++pos_;
+      return json(std::move(out));
     }
-
     while (true) {
-      arr.push_back(parse_value());
-      skip_whitespace();
-
+      out.push_back(parse_value(depth));
+      whitespace();
       char c = next();
-      if (c == ']') break;
-      if (c != ',') throw std::runtime_error("expected ',' or ']'");
-      skip_whitespace();
+      if (c == ']') return json(std::move(out));
+      if (c != ',') fail("Expected comma or closing bracket");
     }
-
-    return json(arr);
   }
-
-  json parse_object() {
-    if (next() != '{') throw std::runtime_error("expected '{'");
-
-    json::object_type obj;
-    skip_whitespace();
-
+  json parse_object(size_t depth) {
+    ++pos_;
+    json::object_type out;
+    whitespace();
     if (peek() == '}') {
-      next();
-      return json(obj);
+      ++pos_;
+      return json(std::move(out));
     }
-
     while (true) {
-      skip_whitespace();
-      if (peek() != '"') throw std::runtime_error("expected string key");
-
-      std::string key = parse_string().as_string();
-      skip_whitespace();
-
-      if (next() != ':') throw std::runtime_error("expected ':'");
-
-      obj[key] = parse_value();
-      skip_whitespace();
-
+      whitespace();
+      auto key = parse_string();
+      whitespace();
+      if (next() != ':') fail("Expected colon");
+      auto value = parse_value(depth);
+      if (!out.emplace(std::move(key), std::move(value)).second) fail("Duplicate object key");
+      whitespace();
       char c = next();
-      if (c == '}') break;
-      if (c != ',') throw std::runtime_error("expected ',' or '}'");
+      if (c == '}') return json(std::move(out));
+      if (c != ',') fail("Expected comma or closing brace");
     }
-
-    return json(obj);
   }
 };
 
-inline json json::parse(std::string_view str) {
-  json_parser parser(str);
-  return parser.parse();
+inline json json::parse(std::string_view str, json_parse_options options) {
+  return json_parser(str, options).parse();
 }
 
 // ============================================================================
@@ -516,56 +600,22 @@ struct serializer<bool> {
   static bool from_json(const json& j) { return j.as_bool(); }
 };
 
-template <>
-struct serializer<int> {
-  static json to_json(const int& value) { return json(value); }
-  static int from_json(const json& j) { return j.as_int(); }
+template <std::integral T>
+  requires(!std::same_as<T, bool>)
+struct serializer<T> {
+  static json to_json(T value) { return json(value); }
+  static T from_json(const json& j) { return j.as_integer<T>(); }
 };
 
-template <>
-struct serializer<long> {
-  static json to_json(const long& value) { return json(value); }
-  static long from_json(const json& j) { return static_cast<long>(j.as_number()); }
-};
-
-template <>
-struct serializer<long long> {
-  static json to_json(const long long& value) { return json(value); }
-  static long long from_json(const json& j) { return static_cast<long long>(j.as_number()); }
-};
-
-template <>
-struct serializer<unsigned int> {
-  static json to_json(const unsigned int& value) { return json(value); }
-  static unsigned int from_json(const json& j) { return static_cast<unsigned int>(j.as_number()); }
-};
-
-template <>
-struct serializer<unsigned long> {
-  static json to_json(const unsigned long& value) { return json(value); }
-  static unsigned long from_json(const json& j) {
-    return static_cast<unsigned long>(j.as_number());
+template <std::floating_point T>
+struct serializer<T> {
+  static json to_json(T value) {
+    if (!std::isfinite(value) || value < -std::numeric_limits<double>::max() ||
+        value > std::numeric_limits<double>::max())
+      throw std::out_of_range("JSON floating number out of range");
+    return json(static_cast<double>(value));
   }
-};
-
-template <>
-struct serializer<unsigned long long> {
-  static json to_json(const unsigned long long& value) { return json(value); }
-  static unsigned long long from_json(const json& j) {
-    return static_cast<unsigned long long>(j.as_number());
-  }
-};
-
-template <>
-struct serializer<float> {
-  static json to_json(const float& value) { return json(value); }
-  static float from_json(const json& j) { return static_cast<float>(j.as_number()); }
-};
-
-template <>
-struct serializer<double> {
-  static json to_json(const double& value) { return json(value); }
-  static double from_json(const json& j) { return j.as_number(); }
+  static T from_json(const json& j) { return j.as<T>(); }
 };
 
 template <>
@@ -620,13 +670,15 @@ struct serializer<std::map<K, V>> {
       K key;
       if constexpr (std::is_same_v<K, std::string>) {
         key = key_str;
-      } else if constexpr (std::is_same_v<K, int>) {
-        key = std::stoi(key_str);
       } else {
-        // 其他类型需要额外处理
-        key = static_cast<K>(std::stoll(key_str));
+        static_assert(std::integral<K> && !std::same_as<K, bool>,
+                      "JSON map keys must be strings or integers");
+        auto parsed = std::from_chars(key_str.data(), key_str.data() + key_str.size(), key);
+        if (parsed.ec != std::errc{} || parsed.ptr != key_str.data() + key_str.size())
+          throw std::invalid_argument("Invalid JSON integer map key");
       }
-      result[key] = serializer<V>::from_json(val);
+      if (!result.emplace(key, serializer<V>::from_json(val)).second)
+        throw std::invalid_argument("Duplicate converted JSON map key");
     }
     return result;
   }
@@ -666,6 +718,8 @@ T from_json_string(std::string_view json_str) {
 }
 
 // 文件 I/O
+// Keep serialization helpers out of the public file-system overload set.
+namespace json_detail {
 inline std::string read_file(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -673,7 +727,9 @@ inline std::string read_file(const std::filesystem::path& path) {
   }
 
   std::ostringstream ss;
-  ss << file.rdbuf();
+  char buffer[8192];
+  while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) ss.write(buffer, file.gcount());
+  if (file.bad() || !file.eof()) throw std::runtime_error("failed to read file: " + path.string());
   return ss.str();
 }
 
@@ -684,17 +740,22 @@ inline void write_file(const std::filesystem::path& path, std::string_view conte
   }
 
   file << content;
+  file.flush();
+  if (!file) throw std::runtime_error("failed to write file: " + path.string());
+  file.close();
+  if (!file) throw std::runtime_error("failed to close file: " + path.string());
 }
+}  // namespace json_detail
 
 template <typename T>
 void save_json(const std::filesystem::path& path, const T& value, int indent = 2) {
   auto json_str = to_json_string(value, indent);
-  write_file(path, json_str);
+  json_detail::write_file(path, json_str);
 }
 
 template <typename T>
 T load_json(const std::filesystem::path& path) {
-  auto json_str = read_file(path);
+  auto json_str = json_detail::read_file(path);
   return from_json_string<T>(json_str);
 }
 

@@ -70,7 +70,7 @@ target_end()
 
 xmake 3.1.1 的 local package 流程跳过了规则安装钩子，且未向通用 installfiles 传入输出路径。cppx 的 `before_package` 为 local 格式补齐安装目录并调用已有规则的安装准备钩子，复用 xmake 的模块元数据生成机制。没有自行维护另一套模块元数据格式。
 
-后续分发将提供带版本校验的 xrepo 源码配方、私有仓库示例和发布流程。
+已提供 `python scripts/package.py --output build/release-candidate --verify`：生成确定性源码包、SHA-256 与固定版本私有 xrepo 配方，并在隔离安装目录验证完整消费者。详见 [发布政策与接入示例](RELEASE_POLICY.md)。
 
 ## 工具链能力探针
 
@@ -82,11 +82,11 @@ xmake check-toolchain --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_sh
 
 探针分别配置、编译、运行以下项目：
 
-1. `cpp23`：普通标准头文件中的 expected、format、ranges，并输出编译器/标准库版本宏。
+1. `cpp23`：普通标准头文件中的 expected、format、ranges、ios::noreplace，并输出编译器/标准库版本宏。
 2. `named_module`：自定义命名模块的导出、导入和链接；显式关闭标准库模块，独立检测语言模块能力。
 3. `import_std`：标准库模块及其 expected、format、容器与算法。
 
-`--require=all` 要求三项全部成功；`--require=cpp23` 只把常规 C++23 作为退出码门槛，另两项仍如实记录；`--require=none` 仅采集结果，不能作为支持平台的验收。命令使用本机工具链，也可通过 CC/CXX 和 SDK 指定编译器；当前不提供交叉编译后跳过运行的“通过”模式。
+`--require=all` 要求三项全部成功；`--require=cpp23` 只把常规 C++23 作为退出码门槛，另两项仍如实记录；`--require=none` 仅采集结果，不能作为支持平台的验收。命令使用本机工具链，也可通过显式 `--cc` / `--cxx` 和 `--sdk` 指定编译器（不能只凭 CI job 名称或 CC/CXX 环境变量认定实际版本）；当前不提供交叉编译后跳过运行的“通过”模式。
 
 默认输出为 `build/toolchain-check/report.json`，使用 `--output=目录` 可修改。每次运行创建新工作目录，独立配置和构建；报告记录每项配置/构建/运行阶段的退出码与 stdout/stderr 日志路径。标准 API 探针的运行日志包含实际编译器和标准库版本信息。
 
@@ -95,6 +95,7 @@ xmake check-toolchain --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_sh
 ```sh
 xmake verify-consumer --mode=debug
 xmake verify-consumer --mode=release
+xmake verify-consumer --mode=release --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
 ```
 
 任务复制当前库的分发输入及消费者 fixture 到全新目录，显式设置子进程工作目录、配置目录与构建目录。这样不会依赖仓库原有对象文件或修改仓库构建配置。
@@ -103,22 +104,21 @@ xmake verify-consumer --mode=release
 
 默认报告为 `build/consumer-check/report.json`。配置或构建失败就停止该消费者后续步骤；任一消费者或打包失败，任务返回非零。每个配置/构建阶段超时五分钟，运行阶段超时一分钟。每次运行的目录与日志保留供排查，后续可按保留周期清理 build 下旧产物。
 
+## 可选组件与开发工具
+
+默认包含全部 10 个模块。`cppx_components=logging,serialization` 只构建选中的模块及其传递依赖；未知名字报错。生产消费者默认不构建 tests/examples/quality/benchmarks。直接在 cppx 根目录构建部分组件时：
+
+```sh
+xmake f -c -y --cppx_build_tests=n --cppx_build_examples=n --cppx_components=logging,serialization
+xmake build
+```
+
+`cppx_build_quality` 和 `cppx_build_benchmarks` 默认为关闭。`cppx_fault_injection` 仅用于独立测试构建并禁止安装/打包；`cppx_sanitizer` 可选 none/address/undefined/thread。优先使用隔离的 [Python 验证命令](QUALITY.md)，避免混用不同构建模式的模块缓存。
+
 ## 当前验证范围
 
-2026-10-10 本地验证环境：Windows x64、VS 2022 17.14.41、MSVC 工具集 14.44.35207、xmake 3.1.1+HEAD.3ba37a0d4。探针输出 `_MSC_FULL_VER=194435229`、`_MSVC_STL_UPDATE=202503`。
+2026-10-12 本地环境为 Windows x64、VS 2022 17.14.41、MSVC 工具集目录 14.44.35207、xmake 3.1.1+HEAD.3ba37a0d4。实际编译器宏为 `_MSC_FULL_VER=194435229`、`_MSVC_STL_UPDATE=202503`。Windows 的源码、本地模块包和新增源码配方均已有独立消费者证据；最新命令、模式、测试数量和产物路径统一见 [STATUS.md](STATUS.md)。
 
-| 检查 | 结果 |
-|---|---|
-| C++23 / 命名模块 / import std | 三项均配置、编译、运行成功 |
-| 不存在的工具链 + `--require=all` | 三项均失败，任务非零退出，报告记录失败 |
-| Debug / Release 全量构建与测试 | 库、11 个测试程序和 10 个示例构建通过；两种模式各 11/11 测试通过 |
-| Release 独立源码 / 本地包消费者 | 两条接入路径均构建、运行通过 |
-| Debug 独立源码 / 本地包消费者 | 两条接入路径均通过，验证目录包含空格 |
-| 根项目配置隔离 | 探针及消费者运行前后，根配置文件 SHA-256 一致 |
-| 格式与差异检查 | 39 个 C++ 文件通过 clang-format 18.1.8；`git diff --check` 通过 |
+远端旧基线 `f6103fd` 的 Clang 18 三项能力已通过；GCC job 实际运行 13.3，Apple Clang 的标准库模块失败。详情见 [编译器报告](COMPILER_NOTES.md)。本次增加 Linux Clang 完整 Debug/Release、消费者与 sanitizer CI，但尚不能将未运行的新增配置视为当前代码在 Linux 上通过。
 
-能力探针报告位于 `build/toolchain-check/report.json`，Release 消费者报告位于 `build/consumer-check/report.json`，本次 Debug 带空格路径验证报告位于 `build/consumer check debug/report.json`。这些生成文件不纳入版本控制；CI 按运行归档日志与报告。
-
-Windows/MSVC 的上述结果属于本地验证。Linux/Clang 18、Linux/GCC 14、macOS/Apple Clang 已加入 CI 探针配置，但尚未获得远端运行结果；它们还不是完整 cppx 的支持平台。当前也未覆盖模块接口变更后的消费者增量重编译、不同工具链二进制混用或共享库分发。
-
-CI 对 Windows 要求三项能力及 Debug/Release 消费者通过；其他平台现阶段仅要求常规 C++23 探针通过。CI 上传 JSON 与日志，不把非必需模块探针失败描述成支持。
+升级/回滚演练对基线和候选分别从源码全量构建；源码包验证检查安装后的模块与发布清单一致。当前没有跨工具链二进制混用、共享库分发或真实下游产品的验收承诺。

@@ -1,0 +1,63 @@
+name: Reliability
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+jobs:
+  quality:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: windows-asan
+          os: windows-2022
+          arguments: --sanitizer=address
+        - name: linux-asan
+          os: ubuntu-24.04
+          arguments: --sanitizer=address --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+        - name: linux-ubsan
+          os: ubuntu-24.04
+          arguments: --sanitizer=undefined --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+        - name: linux-tsan
+          os: ubuntu-24.04
+          arguments: --sanitizer=thread --toolchain=clang --sdk=/usr/lib/llvm-18 --runtimes=c++_shared
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ilammy/msvc-dev-cmd@v1
+      if: runner.os == 'Windows'
+    - name: Install Linux toolchain
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-18 clang-tools-18 libclang-rt-18-dev libc++-18-dev libc++abi-18-dev
+    - uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: '3.1.1'
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Controls, regression tests, fuzz and stress
+      run: python scripts/verify.py --output=build/quality-report ${{ matrix.arguments }} --seconds=${{ github.event_name == 'schedule' && '3600' || '30' }} --iterations=${{ github.event_name == 'schedule' && '200000' || '10000' }}
+    - name: Upload reports and crash reproducer
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: quality-${{ matrix.name }}
+        path: |
+          build/quality-report/*.json
+          build/quality-report/*.jsonl
+          build/quality-report/*.xml
+          build/quality-report/*.log
+          build/quality-report/*reproducer.bin

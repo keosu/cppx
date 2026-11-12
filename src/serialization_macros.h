@@ -4,7 +4,7 @@
 #pragma once
 
 // Check if conforming preprocessor is enabled
-#if !defined(_MSVC_TRADITIONAL) || _MSVC_TRADITIONAL
+#if defined(_MSVC_TRADITIONAL) && _MSVC_TRADITIONAL
   #error "This header requires /Zc:preprocessor flag for conforming preprocessor"
 #endif
 

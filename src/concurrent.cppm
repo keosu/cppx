@@ -5,6 +5,9 @@ export module cppx.concurrent;
 
 import std;
 import cppx.error;
+#ifdef CPPX_FAULT_INJECTION
+import cppx.fault_injection;
+#endif
 
 namespace cppx {
 
@@ -14,189 +17,197 @@ namespace cppx {
 
 export class thread_pool {
  public:
-  explicit thread_pool(size_t num_threads = std::thread::hardware_concurrency()) : stop_(false) {
-    if (num_threads == 0) {
-      num_threads = 1;
-    }
-
+  explicit thread_pool(size_t num_threads = std::thread::hardware_concurrency(),
+                       size_t capacity = 0)
+      : capacity_(capacity) {
+    if (num_threads == 0) num_threads = 1;
     workers_.reserve(num_threads);
-    for (size_t i = 0; i < num_threads; ++i) {
-      workers_.emplace_back([this] { worker_thread(); });
-    }
-  }
-
-  ~thread_pool() {
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex_);
-      stop_ = true;
-    }
-    condition_.notify_all();
-
-    for (std::thread& worker : workers_) {
-      if (worker.joinable()) {
-        worker.join();
+    try {
+      for (size_t i = 0; i < num_threads; ++i) {
+#ifdef CPPX_FAULT_INJECTION
+        testing::thread_creation();
+#endif
+        workers_.emplace_back([this] { worker_thread(); });
       }
+    } catch (...) {
+      close();
+      for (auto& worker : workers_) worker.join();
+      throw;
     }
   }
-
-  // Non-copyable, non-movable
+  // Lifetime must be owned outside the pool's workers.
+  ~thread_pool() { shutdown(); }
   thread_pool(const thread_pool&) = delete;
   thread_pool& operator=(const thread_pool&) = delete;
   thread_pool(thread_pool&&) = delete;
   thread_pool& operator=(thread_pool&&) = delete;
 
-  // Submit a task and get a future
   template <typename F, typename... Args>
   auto submit(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
-    using return_type = std::invoke_result_t<F, Args...>;
-
-    auto task = std::make_shared<std::packaged_task<return_type()>>(
-        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-    std::future<return_type> result = task->get_future();
-
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex_);
-
-      if (stop_) {
-        throw std::runtime_error("Cannot submit task to stopped thread pool");
-      }
-
-      tasks_.emplace([task]() { (*task)(); });
-    }
-
-    condition_.notify_one();
-    return result;
+    return submit_for(std::chrono::milliseconds::zero(), std::forward<F>(f),
+                      std::forward<Args>(args)...);
   }
-
-  // Get number of threads
+  // A full bounded queue rejects on timeout; capacity zero means unbounded.
+  template <typename Rep, typename Period, typename F, typename... Args>
+  auto submit_for(std::chrono::duration<Rep, Period> timeout, F&& f,
+                  Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
+    using R = std::invoke_result_t<F, Args...>;
+    auto task = std::make_shared<std::packaged_task<R()>>(
+        [fn = std::forward<F>(f),
+         arguments = std::make_tuple(std::forward<Args>(args)...)]() mutable -> R {
+          return std::apply(std::move(fn), std::move(arguments));
+        });
+    auto future = task->get_future();
+    std::unique_lock lock(queue_mutex_);
+    if (stop_) throw std::runtime_error("Cannot submit to a closed thread pool");
+    // Reentrant submissions run inline, allowing a single worker to wait on a child future.
+    if (active_pool_ == this) {
+      lock.unlock();
+      (*task)();
+      return future;
+    }
+    if (!space_.wait_for(lock, timeout,
+                         [&] { return stop_ || capacity_ == 0 || tasks_.size() < capacity_; }))
+      throw std::runtime_error("Thread pool queue is full (submission timed out)");
+    if (stop_) throw std::runtime_error("Cannot submit to a closed thread pool");
+    tasks_.emplace([task] { (*task)(); });
+    lock.unlock();
+    condition_.notify_one();
+    return future;
+  }
+  // Reject new work and drain previously accepted work. Callable from a worker.
+  void close() {
+    {
+      std::lock_guard lock(queue_mutex_);
+      stop_ = true;
+    }
+    condition_.notify_all();
+    space_.notify_all();
+  }
+  void shutdown() {
+    if (active_pool_ == this)
+      throw std::logic_error("A pool worker cannot join its own pool; use close()");
+    std::lock_guard lock(join_mutex_);
+    close();
+    for (auto& worker : workers_)
+      if (worker.joinable()) worker.join();
+  }
+  [[nodiscard]] bool is_closed() const {
+    std::lock_guard lock(queue_mutex_);
+    return stop_;
+  }
   [[nodiscard]] size_t size() const { return workers_.size(); }
-
-  // Get number of pending tasks
   [[nodiscard]] size_t pending_tasks() const {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
+    std::lock_guard lock(queue_mutex_);
     return tasks_.size();
   }
 
  private:
   void worker_thread() {
+    active_pool_ = this;
     while (true) {
       std::function<void()> task;
-
       {
-        std::unique_lock<std::mutex> lock(queue_mutex_);
+        std::unique_lock lock(queue_mutex_);
         condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
-
-        if (stop_ && tasks_.empty()) {
-          return;
-        }
-
+        if (stop_ && tasks_.empty()) break;
         task = std::move(tasks_.front());
         tasks_.pop();
       }
-
-      task();
+      space_.notify_one();
+      task();  // packaged_task stores user exceptions in the future
     }
+    active_pool_ = nullptr;
   }
-
+  inline static thread_local thread_pool* active_pool_ = nullptr;
   std::vector<std::thread> workers_;
   std::queue<std::function<void()>> tasks_;
-
   mutable std::mutex queue_mutex_;
+  std::mutex join_mutex_;
   std::condition_variable condition_;
-  bool stop_;
+  std::condition_variable space_;
+  size_t capacity_;
+  bool stop_ = false;
 };
 
-// ============================================================================
-// Parallel for
-// ============================================================================
-
-// Execute function for each element in range in parallel
-export template <typename IndexType, typename Function>
-void parallel_for(IndexType start, IndexType end, Function&& func,
-                  size_t num_threads = std::thread::hardware_concurrency()) {
-  if (start >= end) {
-    return;
-  }
-
-  if (num_threads == 0) {
-    num_threads = 1;
-  }
-
-  IndexType total = end - start;
-  IndexType chunk_size = (total + num_threads - 1) / num_threads;
-
-  std::vector<std::thread> threads;
-  threads.reserve(num_threads);
-
-  for (size_t t = 0; t < num_threads; ++t) {
-    IndexType chunk_start = start + t * chunk_size;
-    IndexType chunk_end = std::min(chunk_start + chunk_size, end);
-
-    if (chunk_start >= chunk_end) {
-      break;
-    }
-
-    threads.emplace_back([chunk_start, chunk_end, &func]() {
-      for (IndexType i = chunk_start; i < chunk_end; ++i) {
-        func(i);
+namespace concurrent_detail {
+class parallel_group {
+ public:
+  ~parallel_group() { join(); }
+  template <typename F>
+  void run(F&& f) {
+#ifdef CPPX_FAULT_INJECTION
+    testing::thread_creation();
+#endif
+    workers_.emplace_back([this, fn = std::forward<F>(f)]() mutable {
+      try {
+        std::invoke(fn);
+      } catch (...) {
+        std::lock_guard lock(mutex_);
+        if (!exception_) exception_ = std::current_exception();
       }
     });
   }
-
-  for (auto& thread : threads) {
-    thread.join();
+  void finish() {
+    join();
+    if (exception_) std::rethrow_exception(exception_);
   }
+
+ private:
+  void join() {
+    for (auto& worker : workers_)
+      if (worker.joinable()) worker.join();
+  }
+  // Destruction joins before any state captured by the workers is destroyed.
+  std::vector<std::thread> workers_;
+  std::mutex mutex_;
+  std::exception_ptr exception_;
+};
+}  // namespace concurrent_detail
+
+export template <std::integral IndexType, typename Function>
+void parallel_for(IndexType start, IndexType end, Function&& func,
+                  size_t num_threads = std::thread::hardware_concurrency()) {
+  if (start >= end) return;
+  using U = std::make_unsigned_t<IndexType>;
+  U total = static_cast<U>(end) - static_cast<U>(start);
+  size_t count =
+      static_cast<size_t>(std::min<std::uintmax_t>(total, std::max<size_t>(1, num_threads)));
+  U chunk = total / static_cast<U>(count);
+  U extra = total % static_cast<U>(count);
+  U offset = 0;
+  concurrent_detail::parallel_group group;
+  for (size_t t = 0; t < count; ++t) {
+    U length = chunk + (t < extra ? 1 : 0);
+    IndexType first = static_cast<IndexType>(static_cast<U>(start) + offset);
+    group.run([first, length, &func] {
+      IndexType current = first;
+      for (U n = 0; n < length; ++n) {
+        std::invoke(func, current);
+        if (n + 1 < length) ++current;
+      }
+    });
+    offset += length;
+  }
+  group.finish();
 }
 
-// Execute function for each element in container in parallel
 export template <typename Container, typename Function>
 void parallel_for_each(Container& container, Function&& func,
                        size_t num_threads = std::thread::hardware_concurrency()) {
-  if (container.empty()) {
-    return;
-  }
-
-  if (num_threads == 0) {
-    num_threads = 1;
-  }
-
-  size_t total = container.size();
-  size_t chunk_size = (total + num_threads - 1) / num_threads;
-
-  std::vector<std::thread> threads;
-  threads.reserve(num_threads);
-
+  if (container.empty()) return;
+  size_t count = std::min(container.size(), std::max<size_t>(1, num_threads));
+  size_t chunk = container.size() / count, extra = container.size() % count;
   auto it = container.begin();
-  for (size_t t = 0; t < num_threads; ++t) {
-    auto chunk_start = it;
-    auto chunk_end = it;
-
-    size_t count = 0;
-    while (count < chunk_size && chunk_end != container.end()) {
-      ++chunk_end;
-      ++count;
-    }
-
-    if (chunk_start == chunk_end) {
-      break;
-    }
-
-    threads.emplace_back([chunk_start, chunk_end, &func]() {
-      for (auto iter = chunk_start; iter != chunk_end; ++iter) {
-        func(*iter);
-      }
+  concurrent_detail::parallel_group group;
+  for (size_t t = 0; t < count; ++t) {
+    auto first = it;
+    std::advance(it, chunk + (t < extra ? 1 : 0));
+    group.run([first, last = it, &func] {
+      for (auto current = first; current != last; ++current) std::invoke(func, *current);
     });
-
-    it = chunk_end;
-    if (it == container.end()) {
-      break;
-    }
   }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
+  group.finish();
 }
 
 // ============================================================================
@@ -320,6 +331,31 @@ class channel {
     return value;
   }
 
+  template <typename Rep, typename Period>
+  std::optional<T> receive_for(std::chrono::duration<Rep, Period> timeout) {
+    std::unique_lock lock(mutex_);
+    if (!recv_cv_.wait_for(lock, timeout, [&] { return closed_ || !queue_.empty(); }) ||
+        queue_.empty())
+      return std::nullopt;
+    T value = std::move(queue_.front());
+    queue_.pop();
+    send_cv_.notify_one();
+    return value;
+  }
+
+  template <typename U, typename Rep, typename Period>
+  bool send_for(U&& value, std::chrono::duration<Rep, Period> timeout) {
+    std::unique_lock lock(mutex_);
+    if (!send_cv_.wait_for(
+            lock, timeout,
+            [&] { return closed_ || capacity_ == 0 || queue_.size() < capacity_; }) ||
+        closed_)
+      return false;
+    queue_.push(std::forward<U>(value));
+    recv_cv_.notify_one();
+    return true;
+  }
+
   // Close the channel
   void close() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -360,55 +396,32 @@ class channel {
 export template <typename T>
 class blocking_queue {
  public:
-  blocking_queue() = default;
-
-  void push(const T& value) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    queue_.push(value);
-    cv_.notify_one();
-  }
-
-  void push(T&& value) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    queue_.push(std::move(value));
-    cv_.notify_one();
-  }
-
+  bool push(const T& value) { return channel_.send(value); }
+  bool push(T&& value) { return channel_.send(std::move(value)); }
+  // Legacy pop throws at end-of-stream; wait_pop returns nullopt after close and drain.
   T pop() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return !queue_.empty(); });
-
-    T value = std::move(queue_.front());
-    queue_.pop();
-    return value;
+    auto value = channel_.receive();
+    if (!value) throw std::runtime_error("Blocking queue is closed and empty");
+    return std::move(*value);
   }
-
+  std::optional<T> wait_pop() { return channel_.receive(); }
+  template <typename Rep, typename Period>
+  std::optional<T> pop_for(std::chrono::duration<Rep, Period> timeout) {
+    return channel_.receive_for(timeout);
+  }
   bool try_pop(T& value) {
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    if (queue_.empty()) {
-      return false;
-    }
-
-    value = std::move(queue_.front());
-    queue_.pop();
+    auto next = channel_.try_receive();
+    if (!next) return false;
+    value = std::move(*next);
     return true;
   }
-
-  [[nodiscard]] bool empty() const {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return queue_.empty();
-  }
-
-  [[nodiscard]] size_t size() const {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return queue_.size();
-  }
+  void close() { channel_.close(); }
+  [[nodiscard]] bool is_closed() const { return channel_.is_closed(); }
+  [[nodiscard]] bool empty() const { return channel_.empty(); }
+  [[nodiscard]] size_t size() const { return channel_.size(); }
 
  private:
-  std::queue<T> queue_;
-  mutable std::mutex mutex_;
-  std::condition_variable cv_;
+  channel<T> channel_;
 };
 
 // ============================================================================
@@ -424,14 +437,9 @@ auto async(F&& f, Args&&... args) {
 // Run multiple functions in parallel and wait for all to complete
 export template <typename... Functions>
 void parallel_invoke(Functions&&... functions) {
-  std::vector<std::thread> threads;
-  threads.reserve(sizeof...(functions));
-
-  (threads.emplace_back(std::forward<Functions>(functions)), ...);
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
+  concurrent_detail::parallel_group group;
+  (group.run(std::forward<Functions>(functions)), ...);
+  group.finish();
 }
 
 // ============================================================================
@@ -442,11 +450,14 @@ export class atomic_counter {
  public:
   explicit atomic_counter(long long initial = 0) : value_(initial) {}
 
-  long long increment() { return value_.fetch_add(1) + 1; }
+  long long increment() { return add(1); }
 
-  long long decrement() { return value_.fetch_sub(1) - 1; }
+  long long decrement() { return add(-1); }
 
-  long long add(long long delta) { return value_.fetch_add(delta) + delta; }
+  long long add(long long delta) {
+    return static_cast<long long>(static_cast<unsigned long long>(value_.fetch_add(delta)) +
+                                  static_cast<unsigned long long>(delta));
+  }
 
   long long get() const { return value_.load(); }
 

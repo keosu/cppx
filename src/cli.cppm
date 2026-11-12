@@ -40,7 +40,7 @@ struct argument {
 // Parsed result
 // ============================================================================
 
-class parse_result {
+export class parse_result {
  public:
   void set_value(const std::string& name, const std::string& value) { values_[name] = value; }
 
@@ -97,7 +97,16 @@ class parse_result {
 
   [[nodiscard]] const std::map<std::string, bool>& flags() const { return flags_; }
 
+  [[nodiscard]] bool help_requested() const noexcept { return help_requested_; }
+  [[nodiscard]] const std::string& help_text() const noexcept { return help_text_; }
+  void request_help(std::string text) {
+    help_requested_ = true;
+    help_text_ = std::move(text);
+  }
+
  private:
+  bool help_requested_ = false;
+  std::string help_text_;
   std::map<std::string, std::string> values_;
   std::map<std::string, bool> flags_;
 };
@@ -116,6 +125,7 @@ export class argument_parser {
   // Add positional argument
   argument_parser& add_positional(const std::string& name, const std::string& description,
                                   bool required = true) {
+    validate_argument(name, "");
     arguments_.emplace_back(name, "", description, arg_type::positional, required);
     return *this;
   }
@@ -124,6 +134,7 @@ export class argument_parser {
   argument_parser& add_option(const std::string& name, const std::string& short_name,
                               const std::string& description, bool required = false,
                               const std::string& default_value = "") {
+    validate_argument(name, short_name);
     auto& arg = arguments_.emplace_back(name, short_name, description, arg_type::option, required);
     arg.default_value = default_value;
     return *this;
@@ -132,6 +143,7 @@ export class argument_parser {
   // Add flag argument (e.g., --verbose, -v)
   argument_parser& add_flag(const std::string& name, const std::string& short_name,
                             const std::string& description) {
+    validate_argument(name, short_name);
     arguments_.emplace_back(name, short_name, description, arg_type::flag, false);
     return *this;
   }
@@ -141,10 +153,10 @@ export class argument_parser {
     for (auto& arg : arguments_) {
       if (arg.name == name) {
         arg.choices = choices;
-        break;
+        return *this;
       }
     }
-    return *this;
+    throw std::invalid_argument("Unknown argument for choices: " + name);
   }
 
   // Add subcommand
@@ -165,159 +177,108 @@ export class argument_parser {
   }
 
   expected<parse_result, error_info> parse(const std::vector<std::string>& args) {
+    using R = expected<parse_result, error_info>;
     parse_result result;
     size_t positional_index = 0;
-
-    // Check for help flag
-    if (std::find(args.begin(), args.end(), "--help") != args.end() ||
-        std::find(args.begin(), args.end(), "-h") != args.end()) {
-      print_help();
-      std::exit(0);
+    bool options = true;
+    if (!args.empty()) {
+      if (auto it = subcommands_.find(args.front()); it != subcommands_.end())
+        return it->second->parse(std::vector<std::string>(args.begin() + 1, args.end()));
     }
-
-    // Check for subcommand
-    if (!args.empty() && !subcommands_.empty()) {
-      const auto& first_arg = args[0];
-      if (!starts_with(first_arg, "-")) {
-        if (auto it = subcommands_.find(first_arg); it != subcommands_.end()) {
-          std::vector<std::string> subargs(args.begin() + 1, args.end());
-          return it->second->parse(subargs);
-        }
-      }
-    }
-
-    // Parse arguments
     for (size_t i = 0; i < args.size(); ++i) {
-      const auto& arg = args[i];
-
-      // Long option or flag (--name)
-      if (starts_with(arg, "--")) {
-        std::string name = arg.substr(2);
-
-        // Check if it's a flag
-        bool is_flag = false;
-        for (const auto& def : arguments_) {
-          if (def.type == arg_type::flag && def.name == name) {
-            result.set_flag(name, true);
-            is_flag = true;
-            break;
-          }
-        }
-
-        if (!is_flag) {
-          // It's an option, need a value
-          if (i + 1 >= args.size()) {
-            return expected<parse_result, error_info>::err(
-                error_info("Option --" + name + " requires a value"));
-          }
-
-          std::string value = args[++i];
-
-          // Validate choices
-          if (auto* def = find_argument(name)) {
-            if (!def->choices.empty()) {
-              if (std::find(def->choices.begin(), def->choices.end(), value) ==
-                  def->choices.end()) {
-                return expected<parse_result, error_info>::err(
-                    error_info("Invalid value for --" + name + ": must be one of " +
-                               join(def->choices, ", ")));
-              }
-            }
-          }
-
-          result.set_value(name, value);
-        }
+      const auto& token = args[i];
+      if (options && token == "--") {
+        options = false;
+        continue;
       }
-      // Short option or flag (-n)
-      else if (starts_with(arg, "-") && arg.length() > 1 && arg[1] != '-') {
-        std::string short_name = arg.substr(1);
-
-        // Find argument by short name
+      if (options && (token == "--help" || token == "-h")) {
+        result.request_help(help_text());
+        return R::ok(std::move(result));
+      }
+      if (options && token.size() > 1 && token.front() == '-') {
+        bool long_option = token.starts_with("--");
+        auto equals = long_option ? token.find('=') : std::string::npos;
+        auto name =
+            token.substr(long_option ? 2 : 1, equals == std::string::npos ? equals : equals - 2);
         const argument* def = nullptr;
-        for (const auto& a : arguments_) {
-          if (a.short_name == short_name) {
-            def = &a;
+        for (const auto& candidate : arguments_) {
+          if (candidate.type != arg_type::positional &&
+              (long_option ? candidate.name == name : candidate.short_name == name)) {
+            def = &candidate;
             break;
           }
         }
-
-        if (!def) {
-          return expected<parse_result, error_info>::err(
-              error_info("Unknown option: -" + short_name));
-        }
-
+        if (!def) return R::err(error_info("Unknown option: " + token));
         if (def->type == arg_type::flag) {
+          if (equals != std::string::npos)
+            return R::err(error_info("Flag does not take a value: " + token));
           result.set_flag(def->name, true);
         } else {
-          if (i + 1 >= args.size()) {
-            return expected<parse_result, error_info>::err(
-                error_info("Option -" + short_name + " requires a value"));
-          }
-          result.set_value(def->name, args[++i]);
-        }
-      }
-      // Positional argument
-      else {
-        // Find next positional argument definition
-        const argument* def = nullptr;
-        size_t pos_count = 0;
-        for (const auto& a : arguments_) {
-          if (a.type == arg_type::positional) {
-            if (pos_count == positional_index) {
-              def = &a;
-              break;
+          if (equals != std::string::npos)
+            result.set_value(def->name, token.substr(equals + 1));
+          else {
+            if (i + 1 == args.size() || args[i + 1].starts_with("--") || args[i + 1] == "-h")
+              return R::err(error_info("Option requires a value: " + token));
+            for (const auto& candidate : arguments_) {
+              if (!candidate.short_name.empty() && args[i + 1] == "-" + candidate.short_name)
+                return R::err(error_info("Option requires a value: " + token));
             }
-            ++pos_count;
+            result.set_value(def->name, args[++i]);
           }
         }
-
-        if (!def) {
-          return expected<parse_result, error_info>::err(
-              error_info("Unexpected positional argument: " + arg));
+      } else {
+        const argument* def = nullptr;
+        size_t index = 0;
+        for (const auto& candidate : arguments_) {
+          if (candidate.type == arg_type::positional && index++ == positional_index) {
+            def = &candidate;
+            break;
+          }
         }
-
-        result.set_value(def->name, arg);
+        if (!def) return R::err(error_info("Unexpected positional argument: " + token));
+        result.set_value(def->name, token);
         ++positional_index;
       }
     }
-
-    // Check required arguments and set defaults
     for (const auto& arg : arguments_) {
-      if (arg.required && !result.has(arg.name)) {
-        return expected<parse_result, error_info>::err(
-            error_info("Missing required argument: " + arg.name));
-      }
-
-      if (!result.has(arg.name) && !arg.default_value.empty()) {
+      if (!result.has(arg.name) && !arg.default_value.empty())
         result.set_value(arg.name, arg.default_value);
-      }
-
-      if (arg.type == arg_type::flag && !result.has(arg.name)) {
-        result.set_flag(arg.name, false);
-      }
+      if (arg.required && !result.has(arg.name))
+        return R::err(error_info("Missing required argument: " + arg.name));
+      if (auto value = result.get_string(arg.name);
+          value && !arg.choices.empty() &&
+          std::find(arg.choices.begin(), arg.choices.end(), *value) == arg.choices.end())
+        return R::err(error_info("Invalid value for " + arg.name + ": must be one of " +
+                                 join(arg.choices, ", ")));
+      if (arg.type == arg_type::flag && !result.has(arg.name)) result.set_flag(arg.name, false);
     }
+    return R::ok(std::move(result));
+  }
 
-    return expected<parse_result, error_info>::ok(std::move(result));
+  [[nodiscard]] std::string help_text() const {
+    std::ostringstream out;
+    print_help(out);
+    return out.str();
   }
 
   // Print help message
-  void print_help() const {
-    std::cout << program_name_;
+  void print_help(std::ostream& out = std::cout) const {
+    out << program_name_;
     if (!description_.empty()) {
-      std::cout << " - " << description_;
+      out << " - " << description_;
     }
-    std::cout << "\n\n";
+    out << "\n\n";
 
-    std::cout << "USAGE:\n";
-    std::cout << "  " << program_name_;
+    out << "USAGE:\n";
+    out << "  " << program_name_;
 
     // Show positional arguments
     for (const auto& arg : arguments_) {
       if (arg.type == arg_type::positional) {
         if (arg.required) {
-          std::cout << " <" << arg.name << ">";
+          out << " <" << arg.name << ">";
         } else {
-          std::cout << " [" << arg.name << "]";
+          out << " [" << arg.name << "]";
         }
       }
     }
@@ -331,92 +292,92 @@ export class argument_parser {
       }
     }
     if (has_options) {
-      std::cout << " [OPTIONS]";
+      out << " [OPTIONS]";
     }
 
     // Show subcommands
     if (!subcommands_.empty()) {
-      std::cout << " <SUBCOMMAND>";
+      out << " <SUBCOMMAND>";
     }
 
-    std::cout << "\n\n";
+    out << "\n\n";
 
     // Positional arguments
     bool has_positional = false;
     for (const auto& arg : arguments_) {
       if (arg.type == arg_type::positional) {
         if (!has_positional) {
-          std::cout << "ARGUMENTS:\n";
+          out << "ARGUMENTS:\n";
           has_positional = true;
         }
-        std::cout << "  " << arg.name;
+        out << "  " << arg.name;
         if (arg.required) {
-          std::cout << " (required)";
+          out << " (required)";
         }
-        std::cout << "\n";
+        out << "\n";
         if (!arg.description.empty()) {
-          std::cout << "      " << arg.description << "\n";
+          out << "      " << arg.description << "\n";
         }
       }
     }
     if (has_positional) {
-      std::cout << "\n";
+      out << "\n";
     }
 
     // Options and flags
-    if (has_options) {
-      std::cout << "OPTIONS:\n";
+    {
+      out << "OPTIONS:\n";
 
       // Help option
-      std::cout << "  -h, --help\n";
-      std::cout << "      Show this help message\n";
+      out << "  -h, --help\n";
+      out << "      Show this help message\n";
 
       for (const auto& arg : arguments_) {
         if (arg.type != arg_type::positional) {
-          std::cout << "  ";
+          out << "  ";
           if (!arg.short_name.empty()) {
-            std::cout << "-" << arg.short_name << ", ";
+            out << "-" << arg.short_name << ", ";
           }
-          std::cout << "--" << arg.name;
+          out << "--" << arg.name;
 
           if (arg.type == arg_type::option) {
-            std::cout << " <value>";
+            out << " <value>";
           }
 
           if (arg.required) {
-            std::cout << " (required)";
+            out << " (required)";
           }
 
-          std::cout << "\n";
+          out << "\n";
 
           if (!arg.description.empty()) {
-            std::cout << "      " << arg.description << "\n";
+            out << "      " << arg.description << "\n";
           }
 
           if (!arg.default_value.empty()) {
-            std::cout << "      [default: " << arg.default_value << "]\n";
+            out << "      [default: " << arg.default_value << "]\n";
           }
 
           if (!arg.choices.empty()) {
-            std::cout << "      [choices: " << join(arg.choices, ", ") << "]\n";
+            out << "      [choices: " << join(arg.choices, ", ") << "]\n";
           }
         }
       }
-      std::cout << "\n";
+      out << "\n";
     }
 
     // Subcommands
     if (!subcommands_.empty()) {
-      std::cout << "SUBCOMMANDS:\n";
+      out << "SUBCOMMANDS:\n";
       for (const auto& [name, parser] : subcommands_) {
-        std::cout << "  " << name;
+        out << "  " << name;
         if (!parser->description_.empty()) {
-          std::cout << " - " << parser->description_;
+          out << " - " << parser->description_;
         }
-        std::cout << "\n";
+        out << "\n";
       }
-      std::cout << "\n";
-      std::cout << "Use '" << program_name_ << " <SUBCOMMAND> --help' for more information\n";
+      out << "\n";
+      out << "Use '" << program_name_ << " <SUBCOMMAND> --help' for more information\n";
     }
   }
 
@@ -425,6 +386,14 @@ export class argument_parser {
   [[nodiscard]] const std::string& description() const { return description_; }
 
  private:
+  void validate_argument(const std::string& name, const std::string& short_name) const {
+    if (name.empty() || name.front() == '-' || name.find_first_of("= ") != std::string::npos ||
+        name == "help" || short_name == "h" || (!short_name.empty() && short_name.front() == '-'))
+      throw std::invalid_argument("Invalid or reserved argument name");
+    for (const auto& arg : arguments_)
+      if (arg.name == name || (!short_name.empty() && arg.short_name == short_name))
+        throw std::invalid_argument("Duplicate argument name or alias");
+  }
   const argument* find_argument(const std::string& name) const {
     for (const auto& arg : arguments_) {
       if (arg.name == name) {

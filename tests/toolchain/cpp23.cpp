@@ -1,11 +1,14 @@
 #include <expected>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <ranges>
 #include <string>
 #include <version>
 
 int main() {
+  auto exclusive_create = std::ios::out | std::ios::noreplace;
+  if (exclusive_create == std::ios::out) return 1;
   std::expected<int, std::string> value = 42;
   int sum = 0;
   for (int number : std::views::iota(1, 4)) sum += number;
